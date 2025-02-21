@@ -358,7 +358,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 poll_correct_answers[pid] = correct_id
 
             # انتظار ثانيتين لتفادي أي مشكلة في إرسال الاستفتاءات بسرعة
-            await asyncio.sleep(2)
+            await asyncio.sleep(0.5)
 
         # تخزين بيانات الكويز
         context.user_data[ACTIVE_QUIZ_KEY] = {
