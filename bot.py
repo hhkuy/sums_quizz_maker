@@ -70,7 +70,7 @@ def fetch_questions(file_path: str):
         return []
 
 # -------------------------------------------------
-# 5) مفاتيح لحفظ الحالة في context.user_data
+# 5) مفاتيح لحفظ الحالة في context.user_data و context.chat_data
 # -------------------------------------------------
 TOPICS_KEY = "topics"
 CUR_TOPIC_IDX_KEY = "current_topic_index"
@@ -87,7 +87,8 @@ STATE_SENDING_QUESTIONS = "sending_questions"
 # -------------------------------------------------
 # 6) مفاتيح إضافية لحفظ بيانات الكويز/النتائج
 # -------------------------------------------------
-ACTIVE_QUIZ_KEY = "active_quiz"  # سيخزن تفاصيل الكويز الحالي (poll_ids وغيرها)
+# سيتم تخزين بيانات الكويز في context.chat_data حتى يتمكن الجميع من المشاركة
+ACTIVE_QUIZ_KEY = "active_quiz"
 
 # -------------------------------------------------
 # 7) دوال لإنشاء الأزرار (InlineKeyboard)
@@ -158,14 +159,30 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "الأوامر المتاحة:\n"
         "/start - لبدء اختيار المواضيع\n"
-        "/help - عرض هذه الرسالة\n\n"
+        "/help - عرض هذه الرسالة\n"
+        "/medsums - فتح موقع MedSums داخل البوت\n\n"
         "يمكنك أيضًا مناداتي في المجموعات وسيعمل البوت عند كتابة:\n"
         "«بوت سوي اسئلة» أو «بوت الاسئلة» أو «بوت وينك».\n"
     )
     await update.message.reply_text(help_text)
 
 # -------------------------------------------------
-# 10) هاندلر للأزرار (CallbackQueryHandler)
+# 10) أمر البوت: /medsums
+# -------------------------------------------------
+async def medsums_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    يقوم هذا الأمر بإرسال زر لفتح موقع MedSums داخل البوت.
+    """
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("فتح موقع MedSums", url="https://sites.google.com/view/medsums")]
+    ])
+    await update.message.reply_text(
+        "يمكنك زيارة موقع MedSums من خلال الضغط على الزر أدناه:",
+        reply_markup=keyboard
+    )
+
+# -------------------------------------------------
+# 11) هاندلر للأزرار (CallbackQueryHandler)
 # -------------------------------------------------
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -257,7 +274,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("لم أفهم هذا الخيار.")
 
 # -------------------------------------------------
-# 11) هاندلر للرسائل النصية (لعدد الأسئلة)
+# 12) هاندلر للرسائل النصية (لعدد الأسئلة)
 # -------------------------------------------------
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # إذا كانت الرسالة في مجموعة وتتضمن إحدى العبارات التالية، نبدأ /start
@@ -323,10 +340,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"سيتم إرسال {num_q} سؤال(أسئلة) على شكل استفتاء (Quiz). بالتوفيق!"
         )
 
-        # سنخزن بيانات الكويز في user_data لتتبع الإجابات
+        # سنخزن بيانات الكويز في chat_data لتتبع إجابات الجميع
         poll_ids = []
         poll_correct_answers = {}
-        owner_id = update.message.from_user.id
         chat_id = update.message.chat_id
 
         # إرسال كل سؤال
@@ -360,19 +376,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # انتظار ثانيتين لتفادي أي مشكلة في إرسال الاستفتاءات بسرعة
             await asyncio.sleep(1)
 
-        # تخزين بيانات الكويز
-        context.user_data[ACTIVE_QUIZ_KEY] = {
-            "owner_id": owner_id,
-            "chat_id": chat_id,
+        # تخزين بيانات الكويز في chat_data بدلاً من user_data حتى يتمكن الجميع من المشاركة
+        context.chat_data[ACTIVE_QUIZ_KEY] = {
             "poll_ids": poll_ids,
             "poll_correct_answers": poll_correct_answers,
             "total": num_q,
-            "correct_count": 0,
-            "wrong_count": 0,
-            "answered_count": 0
+            "participants": {}  # سيتم تخزين نتائج كل مشارك هنا
         }
 
-        # يمكن إعادة ضبط الحالة
+        # إعادة ضبط الحالة
         context.user_data[CURRENT_STATE_KEY] = None
 
     else:
@@ -380,7 +392,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
 # -------------------------------------------------
-# 12) هاندلر لاستقبال إجابات المستخدم (PollAnswerHandler)
+# 13) هاندلر لاستقبال إجابات المستخدم (PollAnswerHandler)
 # -------------------------------------------------
 async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     poll_answer = update.poll_answer
@@ -388,33 +400,40 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     poll_id = poll_answer.poll_id
     selected_options = poll_answer.option_ids  # قائمة بالـ indices التي اختارها المستخدم
 
-    quiz_data = context.user_data.get(ACTIVE_QUIZ_KEY)
+    quiz_data = context.chat_data.get(ACTIVE_QUIZ_KEY)
     if not quiz_data:
         return  # لا يوجد كويز فعال حاليًا
 
-    # تحقق هل هذا الاستفتاء ينتمي للكويز الذي أطلقه المستخدم
+    # تحقق هل هذا الاستفتاء ينتمي للكويز الحالي
     if poll_id not in quiz_data["poll_ids"]:
         return
 
-    # نسمح فقط لصاحب الطلب بحساب النتيجة (يمكن توسيعها لاحقًا)
-    if user_id != quiz_data["owner_id"]:
-        return
+    # الحصول على بيانات المشارك أو تهيئتها إذا لم تكن موجودة
+    participant = quiz_data["participants"].get(user_id, {
+        "answered_count": 0,
+        "correct_count": 0,
+        "wrong_count": 0,
+        "first_name": poll_answer.user.first_name
+    })
 
     # يفترض أنه Quiz باختيار واحد؛ لو تعدد فالأمر مختلف
     if len(selected_options) == 1:
         chosen_index = selected_options[0]
         correct_option_id = quiz_data["poll_correct_answers"][poll_id]
 
-        quiz_data["answered_count"] += 1
+        participant["answered_count"] += 1
         if chosen_index == correct_option_id:
-            quiz_data["correct_count"] += 1
+            participant["correct_count"] += 1
         else:
-            quiz_data["wrong_count"] += 1
+            participant["wrong_count"] += 1
 
-        # إذا المستخدم أنهى الإجابة على كل الأسئلة
-        if quiz_data["answered_count"] == quiz_data["total"]:
-            correct = quiz_data["correct_count"]
-            wrong = quiz_data["wrong_count"]
+        # تحديث بيانات المشارك في الكويز
+        quiz_data["participants"][user_id] = participant
+
+        # إذا المشارك أنهى الإجابة على كل الأسئلة، نرسل له النتيجة
+        if participant["answered_count"] == quiz_data["total"]:
+            correct = participant["correct_count"]
+            wrong = participant["wrong_count"]
             total = quiz_data["total"]
             user_mention = f'<a href="tg://user?id={user_id}">{poll_answer.user.first_name}</a>'
             msg = (
@@ -424,15 +443,13 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                 f"النتيجة النهائية: {correct} / {total}\n"
             )
             await context.bot.send_message(
-                chat_id=quiz_data["chat_id"],
+                chat_id=quiz_data.get("chat_id", update.effective_chat.id),
                 text=msg,
                 parse_mode="HTML"
             )
-            # مسح بيانات الكويز بعد الانتهاء
-            context.user_data[ACTIVE_QUIZ_KEY] = None
 
 # -------------------------------------------------
-# 13) دالة main لتشغيل البوت
+# 14) دالة main لتشغيل البوت
 # -------------------------------------------------
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -440,6 +457,7 @@ def main():
     # ربط الأوامر
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("medsums", medsums_command))
 
     # أزرار (CallbackQuery)
     app.add_handler(CallbackQueryHandler(callback_handler))
