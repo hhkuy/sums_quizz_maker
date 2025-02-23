@@ -169,15 +169,15 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # -------------------------------------------------
 async def medsums_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    عند تنفيذ /medsums يتم فتح موقع MedSums داخل البوت باستخدام Web App.
+    عند تنفيذ /medsums يقوم البوت بمحاولة فتح موقع MedSums داخل البوت مباشرة.
+    (ملاحظة: فتح الويب آب بشكل تلقائي دون تفاعل المستخدم غير مدعوم من تيليجرام،
+    لذا فإن الرسالة التي تُرسل تحتوي على زر الويب آب الذي يُفترض النقر عليه فور ظهوره.)
     """
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("فتح موقع MedSums", web_app=WebAppInfo(url="https://sites.google.com/view/medsums"))]
+        [InlineKeyboardButton(text="فتح MedSums", web_app=WebAppInfo(url="https://sites.google.com/view/medsums"))]
     ])
-    await update.message.reply_text(
-        "يمكنك زيارة موقع MedSums داخل البوت من خلال الضغط على الزر أدناه:",
-        reply_markup=keyboard
-    )
+    # إرسال رسالة تحتوي فقط على زر الويب آب؛ يتم عرضها فورًا
+    await update.message.reply_text(text="", reply_markup=keyboard)
 
 # -------------------------------------------------
 # 10) هاندلر للأزرار (CallbackQueryHandler)
@@ -232,8 +232,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data[CUR_SUBTOPIC_IDX_KEY] = s_idx
         context.user_data[CURRENT_STATE_KEY] = STATE_ASK_NUM_QUESTIONS
 
-        # عند اختيار الموضوع الفرعي نرسل رسالة تطلب إدخال عدد الأسئلة،
-        # وفي المجموعات يجب على المستخدم الرد على رسالة البوت نفسها.
+        # في المجموعات يجب على المستخدم الرد على رسالة البوت نفسها لإدخال عدد الأسئلة
         back_btn = InlineKeyboardButton(
             "« رجوع للمواضيع الفرعية",
             callback_data=f"go_back_subtopics_{t_idx}"
@@ -245,7 +244,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=msg_text,
             reply_markup=kb
         )
-        # حفظ معرف الرسالة حتى يتمكن البوت من التحقق عند الرد (في المجموعات)
+        # حفظ معرف الرسالة لتأكيد الرد (في حالة المجموعات)
         context.user_data["ask_msg_id"] = sent_msg.message_id
 
     # 4) زر الرجوع لقائمة المواضيع الفرعية
@@ -279,7 +278,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 11) هاندلر للرسائل النصية (لعدد الأسئلة)
 # -------------------------------------------------
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # في المجموعات إذا احتوت الرسالة على أحد التريجرات، يبدأ البوت
+    # في المجموعات: عند كتابة إحدى العبارات "بوت سوي اسئلة" أو "بوت الاسئلة" أو "بوت وينك"
     if update.message.chat.type in ("group", "supergroup"):
         text_lower = update.message.text.lower()
         triggers = ["بوت سوي اسئلة", "بوت الاسئلة", "بوت وينك"]
@@ -289,7 +288,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_state = context.user_data.get(CURRENT_STATE_KEY, None)
     
-    # إذا كنا في مرحلة طلب عدد الأسئلة
+    # مرحلة طلب عدد الأسئلة
     if user_state == STATE_ASK_NUM_QUESTIONS:
         # في المجموعات يجب أن يكون الرد على رسالة البوت نفسها
         if update.message.chat.type in ("group", "supergroup"):
@@ -323,7 +322,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("خطأ في اختيار الموضوع الفرعي.")
             return
 
-        # المسار الخاص بملف الأسئلة
         file_path = subtopics[s_idx]["file"]
         questions = fetch_questions(file_path)
         if not questions:
@@ -374,7 +372,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await asyncio.sleep(1)
 
-        # تخزين بيانات الكويز في chat_data مع حفظ معرف الدردشة ونوعها
+        # تخزين بيانات الكويز في chat_data
         context.chat_data[ACTIVE_QUIZ_KEY] = {
             "poll_ids": poll_ids,
             "poll_correct_answers": poll_correct_answers,
@@ -420,6 +418,7 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         quiz_data["participants"][user_id] = participant
 
+        # عند انتهاء المشارك من الإجابة على جميع الأسئلة، يُرسل له النتيجة فورًا
         if participant["answered_count"] == quiz_data["total"]:
             correct = participant["correct_count"]
             wrong = participant["wrong_count"]
@@ -431,7 +430,7 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                 f"الإجابات الخاطئة: {wrong}\n"
                 f"النتيجة النهائية: {correct} / {total}\n"
             )
-            # إذا كانت الدردشة مجموعة، نحاول إرسال النتيجة في رسالة خاصة للمستخدم
+            # في المجموعات نحاول إرسال النتيجة في رسالة خاصة للمشارك، وإذا فشل ذلك نرسلها في الدردشة العامة
             if quiz_data.get("chat_type") in ("group", "supergroup"):
                 try:
                     await context.bot.send_message(
@@ -441,7 +440,6 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                     )
                 except Exception as e:
                     logger.error(f"Error sending private message: {e}")
-                    # في حال فشل الإرسال الخاص، نرسل النتيجة في الدردشة العامة
                     await context.bot.send_message(
                         chat_id=quiz_data.get("chat_id", update.effective_chat.id),
                         text=msg,
@@ -468,7 +466,7 @@ def main():
     # ربط الأزرار (CallbackQuery)
     app.add_handler(CallbackQueryHandler(callback_handler))
 
-    # استقبال الرسائل النصية (عدد الأسئلة + التريجرات في المجموعات)
+    # استقبال الرسائل النصية (عدد الأسئلة + تريجرات المجموعات)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
     # استقبال أجوبة الاستفتاء (PollAnswer)
