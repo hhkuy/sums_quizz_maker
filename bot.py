@@ -107,7 +107,7 @@ def generate_topics_inline_keyboard(topics_data):
 
 def generate_subtopics_inline_keyboard(topic, topic_index):
     """
-    إنشاء إنلاين كيبورد لقائمة المواضيع الفرعية + زر الرجوع.
+    إنشاء إنلاين كيبورد لقائمة المواضيع الفرعية مع زر الرجوع.
     """
     keyboard = []
     subtopics = topic.get("subTopics", [])
@@ -121,17 +121,14 @@ def generate_subtopics_inline_keyboard(topic, topic_index):
     # زر الرجوع لقائمة المواضيع
     back_btn = InlineKeyboardButton("« رجوع للمواضيع", callback_data="go_back_topics")
     keyboard.append([back_btn])
-
     return InlineKeyboardMarkup(keyboard)
 
 # -------------------------------------------------
-# 7) أوامر البوت: /start
+# 7) أمر البوت: /start
 # -------------------------------------------------
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    عند تنفيذ /start:
-    - نجلب قائمة المواضيع من GitHub.
-    - نعرضها على شكل أزرار.
+    عند تنفيذ /start يتم جلب المواضيع من GitHub وعرضها كأزرار.
     """
     topics_data = fetch_topics()
     context.user_data[TOPICS_KEY] = topics_data
@@ -144,14 +141,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data[CURRENT_STATE_KEY] = STATE_SELECT_TOPIC
     keyboard = generate_topics_inline_keyboard(topics_data)
-
     await update.message.reply_text(
         text="مرحبًا بك! اختر الموضوع الرئيسي من القائمة:",
         reply_markup=keyboard
     )
 
 # -------------------------------------------------
-# 8) أوامر البوت: /help
+# 8) أمر البوت: /help
 # -------------------------------------------------
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
@@ -159,7 +155,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/start - لبدء اختيار المواضيع\n"
         "/help - عرض هذه الرسالة\n"
         "/medsums - فتح موقع MedSums داخل البوت\n\n"
-        "يمكنك أيضًا مناداتي في المجموعات وسيعمل البوت عند كتابة:\n"
+        "كما يمكنك مناداتي في المجموعات باستخدام:\n"
         "«بوت سوي اسئلة» أو «بوت الاسئلة» أو «بوت وينك».\n"
     )
     await update.message.reply_text(help_text)
@@ -169,15 +165,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # -------------------------------------------------
 async def medsums_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    عند تنفيذ /medsums يقوم البوت بمحاولة فتح موقع MedSums داخل البوت مباشرة.
-    (ملاحظة: فتح الويب آب بشكل تلقائي دون تفاعل المستخدم غير مدعوم من تيليجرام،
-    لذا فإن الرسالة التي تُرسل تحتوي على زر الويب آب الذي يُفترض النقر عليه فور ظهوره.)
+    عند تنفيذ /medsums يتم إرسال رسالة تحتوي على زر الويب آب،
+    بحيث يظهر للمستخدم زر لفتح موقع MedSums داخل البوت.
     """
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(text="فتح MedSums", web_app=WebAppInfo(url="https://sites.google.com/view/medsums"))]
+        [InlineKeyboardButton(text="اضغط هنا لفتح MedSums", web_app=WebAppInfo(url="https://sites.google.com/view/medsums"))]
     ])
-    # إرسال رسالة تحتوي فقط على زر الويب آب؛ يتم عرضها فورًا
-    await update.message.reply_text(text="", reply_markup=keyboard)
+    await update.message.reply_text(
+        text="يمكنك فتح موقع MedSums داخل البوت من خلال الضغط على الزر أدناه:",
+        reply_markup=keyboard
+    )
 
 # -------------------------------------------------
 # 10) هاندلر للأزرار (CallbackQueryHandler)
@@ -187,7 +184,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
-    # 1) اختيار موضوع رئيسي
+    # اختيار موضوع رئيسي
     if data.startswith("topic_"):
         _, idx_str = data.split("_")
         topic_index = int(idx_str)
@@ -205,25 +202,23 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"اختر الموضوع الفرعي لـ: *{chosen_topic['topicName']}*\n\n"
             f"{chosen_topic.get('description', '')}"
         )
-
         await query.message.edit_text(
             text=msg_text,
             parse_mode="Markdown",
             reply_markup=subtopics_keyboard
         )
 
-    # 2) زر الرجوع لقائمة المواضيع
+    # زر الرجوع لقائمة المواضيع
     elif data == "go_back_topics":
         context.user_data[CURRENT_STATE_KEY] = STATE_SELECT_TOPIC
         topics_data = context.user_data.get(TOPICS_KEY, [])
         keyboard = generate_topics_inline_keyboard(topics_data)
-
         await query.message.edit_text(
             text="اختر الموضوع الرئيسي من القائمة:",
             reply_markup=keyboard
         )
 
-    # 3) اختيار موضوع فرعي
+    # اختيار موضوع فرعي
     elif data.startswith("subtopic_"):
         _, t_idx_str, s_idx_str = data.split("_")
         t_idx = int(t_idx_str)
@@ -232,22 +227,19 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data[CUR_SUBTOPIC_IDX_KEY] = s_idx
         context.user_data[CURRENT_STATE_KEY] = STATE_ASK_NUM_QUESTIONS
 
-        # في المجموعات يجب على المستخدم الرد على رسالة البوت نفسها لإدخال عدد الأسئلة
         back_btn = InlineKeyboardButton(
             "« رجوع للمواضيع الفرعية",
             callback_data=f"go_back_subtopics_{t_idx}"
         )
         kb = InlineKeyboardMarkup([[back_btn]])
-
         msg_text = "أدخل عدد الأسئلة المطلوبة (أرسل رقمًا فقط):"
         sent_msg = await query.message.edit_text(
             text=msg_text,
             reply_markup=kb
         )
-        # حفظ معرف الرسالة لتأكيد الرد (في حالة المجموعات)
         context.user_data["ask_msg_id"] = sent_msg.message_id
 
-    # 4) زر الرجوع لقائمة المواضيع الفرعية
+    # زر الرجوع لقائمة المواضيع الفرعية
     elif data.startswith("go_back_subtopics_"):
         _, t_idx_str = data.split("_subtopics_")
         t_idx = int(t_idx_str)
@@ -262,7 +254,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"اختر الموضوع الفرعي لـ: *{chosen_topic['topicName']}*\n\n"
                 f"{chosen_topic.get('description', '')}"
             )
-
             await query.message.edit_text(
                 text=msg_text,
                 parse_mode="Markdown",
@@ -270,7 +261,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             await query.message.edit_text("خيار غير صحيح.")
-
     else:
         await query.message.reply_text("لم أفهم هذا الخيار.")
 
@@ -287,10 +277,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     user_state = context.user_data.get(CURRENT_STATE_KEY, None)
-    
-    # مرحلة طلب عدد الأسئلة
     if user_state == STATE_ASK_NUM_QUESTIONS:
-        # في المجموعات يجب أن يكون الرد على رسالة البوت نفسها
+        # في المجموعات يجب الرد على رسالة البوت نفسها
         if update.message.chat.type in ("group", "supergroup"):
             if not update.message.reply_to_message or update.message.reply_to_message.from_user.id != context.bot.id:
                 return
@@ -308,7 +296,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data[NUM_QUESTIONS_KEY] = num_q
         context.user_data[CURRENT_STATE_KEY] = STATE_SENDING_QUESTIONS
 
-        # جلب البيانات اللازمة
         topics_data = context.user_data.get(TOPICS_KEY, [])
         t_idx = context.user_data.get(CUR_TOPIC_IDX_KEY, 0)
         s_idx = context.user_data.get(CUR_SUBTOPIC_IDX_KEY, 0)
@@ -350,7 +337,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             raw_question = q.get("question", "سؤال بدون نص!")
             clean_question = re.sub(r"<.*?>", "", raw_question).strip()
             clean_question = re.sub(r"(Question\s*\d+)", r"\1 -", clean_question)
-
             options = q.get("options", [])
             correct_id = q.get("answer", 0)
             explanation = q.get("explanation", "")
@@ -372,7 +358,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await asyncio.sleep(1)
 
-        # تخزين بيانات الكويز في chat_data
         context.chat_data[ACTIVE_QUIZ_KEY] = {
             "poll_ids": poll_ids,
             "poll_correct_answers": poll_correct_answers,
@@ -418,7 +403,7 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         quiz_data["participants"][user_id] = participant
 
-        # عند انتهاء المشارك من الإجابة على جميع الأسئلة، يُرسل له النتيجة فورًا
+        # إذا أكمل المشارك جميع الأسئلة يتم إرسال النتيجة فوراً
         if participant["answered_count"] == quiz_data["total"]:
             correct = participant["correct_count"]
             wrong = participant["wrong_count"]
@@ -430,7 +415,7 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                 f"الإجابات الخاطئة: {wrong}\n"
                 f"النتيجة النهائية: {correct} / {total}\n"
             )
-            # في المجموعات نحاول إرسال النتيجة في رسالة خاصة للمشارك، وإذا فشل ذلك نرسلها في الدردشة العامة
+            # محاولة إرسال النتيجة في الخاص، وإن فشل إرسالها في الدردشة العامة
             if quiz_data.get("chat_type") in ("group", "supergroup"):
                 try:
                     await context.bot.send_message(
@@ -458,23 +443,15 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # ربط الأوامر
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("medsums", medsums_command))
-
-    # ربط الأزرار (CallbackQuery)
     app.add_handler(CallbackQueryHandler(callback_handler))
-
-    # استقبال الرسائل النصية (عدد الأسئلة + تريجرات المجموعات)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-
-    # استقبال أجوبة الاستفتاء (PollAnswer)
     app.add_handler(PollAnswerHandler(poll_answer_handler))
 
-    logger.info("Bot is running on Railway...")
+    logger.info("Bot is running...")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
