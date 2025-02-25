@@ -88,7 +88,7 @@ def fetch_topics_with_counts():
 # -------------------------------------------------
 # 5) مفاتيح حفظ الحالة واستخدامها
 # -------------------------------------------------
-TOPICS_KEY = "topics"               
+TOPICS_KEY = "topics"
 CUR_TOPIC_IDX_KEY = "current_topic_index"
 CUR_SUBTOPIC_IDX_KEY = "current_subtopic_index"
 CURRENT_STATE_KEY = "current_state"
@@ -99,16 +99,16 @@ STATE_SELECT_SUBTOPIC = "select_subtopic"
 STATE_SUBTOPIC_OPTIONS = "subtopic_options"
 STATE_ASK_NUM_QUESTIONS = "ask_num_questions"
 
-ALL_QUESTIONS_LIST = "all_questions_list"  
-ALL_QUESTIONS_IDX = "all_questions_index"  
-BOT_LAST_MESSAGE_ID = "bot_last_message_id"  
+ALL_QUESTIONS_LIST = "all_questions_list"
+ALL_QUESTIONS_IDX = "all_questions_index"
+BOT_LAST_MESSAGE_ID = "bot_last_message_id"
 
 # -------------------------------------------------
 # 6) إدارة الاختبارات العشوائية (لكل مستخدم على حدة):
 # -------------------------------------------------
-QUIZ_DATA = "quizzes_data"  
-POLL_TO_QUIZ_ID = "poll_to_quiz_id"  
-QUIZ_ID_COUNTER = "quiz_id_counter"  
+QUIZ_DATA = "quizzes_data"
+POLL_TO_QUIZ_ID = "poll_to_quiz_id"
+QUIZ_ID_COUNTER = "quiz_id_counter"
 
 # -------------------------------------------------
 # 7) دوال لإنشاء الأزرار (InlineKeyboard)
@@ -224,7 +224,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 1) اختيار موضوع رئيسي
     if data.startswith("topic_"):
-        _, idx_str = data.split("_")
+        # ["topic","idx"]
+        _, idx_str = data.split("_", 1)
         topic_index = int(idx_str)
         context.user_data[CUR_TOPIC_IDX_KEY] = topic_index
         context.user_data[CURRENT_STATE_KEY] = STATE_SELECT_SUBTOPIC
@@ -257,9 +258,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 3) اختيار موضوع فرعي -> عرض الأزرار الثلاثة
     elif data.startswith("subtopic_"):
-        _, t_idx_str, s_idx_str = data.split("_")
+        # ["subtopic","t_idx","s_idx"]
+        _, t_idx_str, s_idx_str = data.split("_", 2)
         t_idx = int(t_idx_str)
         s_idx = int(s_idx_str)
+
         context.user_data[CUR_TOPIC_IDX_KEY] = t_idx
         context.user_data[CUR_SUBTOPIC_IDX_KEY] = s_idx
         context.user_data[CURRENT_STATE_KEY] = STATE_SUBTOPIC_OPTIONS
@@ -283,7 +286,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 4) زر الرجوع لقائمة المواضيع الفرعية
     elif data.startswith("go_back_subtopics_"):
-        _, t_idx_str = data.split("_subtopics_")
+        # ["go","back","subtopics","t_idx"]
+        _, _, _, t_idx_str = data.split("_", 3)
         t_idx = int(t_idx_str)
         context.user_data[CUR_TOPIC_IDX_KEY] = t_idx
         context.user_data[CURRENT_STATE_KEY] = STATE_SELECT_SUBTOPIC
@@ -305,9 +309,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 5) إرسال جميع الأسئلة (T/F) -> إعداد الإرسال المجزأ
     elif data.startswith("send_all_"):
-        # تصحيح التقسيم:
         # ["send","all","t_idx","s_idx"]
-        t_idx_str, s_idx_str = data.split("_")[2:]
+        _, _, t_idx_str, s_idx_str = data.split("_", 3)
         t_idx = int(t_idx_str)
         s_idx = int(s_idx_str)
 
@@ -323,14 +326,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 6) زر "إرسال بقية الأسئلة"
     elif data.startswith("send_all_next_"):
         # ["send","all","next","t_idx","s_idx"]
-        _, t_idx_str, s_idx_str = data.split("_")[2:]
+        _, _, _, t_idx_str, s_idx_str = data.split("_", 4)
         t_idx = int(t_idx_str)
         s_idx = int(s_idx_str)
         await send_all_questions_chunk(update, context, t_idx, s_idx, continuation=True)
 
     # 7) تحديد عدد الأسئلة (عشوائي)
     elif data.startswith("ask_random_"):
-        _, t_idx_str, s_idx_str = data.split("_")
+        # ["ask","random","t_idx","s_idx"]
+        _, _, t_idx_str, s_idx_str = data.split("_", 3)
         t_idx = int(t_idx_str)
         s_idx = int(s_idx_str)
 
@@ -373,6 +377,7 @@ async def send_all_questions_chunk(update: Update, context: ContextTypes.DEFAULT
     batch = questions[start_index:end_index]
 
     if not continuation:
+        # تحرير رسالة زر الإرسال ليكون واضحًا أننا سنبدأ الإرسال
         await query.message.edit_text("جاري إرسال الأسئلة...")
 
     chat_id = query.message.chat_id
@@ -383,6 +388,11 @@ async def send_all_questions_chunk(update: Update, context: ContextTypes.DEFAULT
         question_text = re.sub(r"<.*?>", "", question_text)
         correct_answer = q.get("answer", 0)
         explanation = q.get("explanation", "")
+
+        # تأكد أن correct_answer=0 أو 1 فقط بما يناسب خيارات ["صح", "خطأ"]
+        # إذا كان خارج النطاق، سيتم تجاهله أو يسبب خطأ من تيليجرام
+        if correct_answer not in (0, 1):
+            correct_answer = 0
 
         await context.bot.send_poll(
             chat_id=chat_id,
@@ -401,7 +411,8 @@ async def send_all_questions_chunk(update: Update, context: ContextTypes.DEFAULT
         remaining = len(questions) - end_index
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"تم إرسال {end_index} سؤال. تبقّى {remaining} سؤال.\nاضغط على الزر لمتابعة الإرسال.",
+            text=f"تم إرسال {end_index} سؤال. تبقّى {remaining} سؤال.\n"
+                 f"اضغط على الزر لمتابعة الإرسال.",
             reply_markup=kb
         )
     else:
@@ -431,6 +442,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not text_lower.isdigit():
             if update.message.chat.type in ("group", "supergroup"):
                 bot_last_msg_id = context.user_data.get(BOT_LAST_MESSAGE_ID)
+                # يجب الرد على رسالة البوت الأخيرة
                 if (update.message.reply_to_message is None or
                     update.message.reply_to_message.message_id != bot_last_msg_id):
                     await update.message.reply_text("رقم غير صحيح. يجب الرد على رسالة البوت الأخيرة.")
@@ -508,6 +520,16 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             correct_id = q.get("answer", 0)
             explanation = q.get("explanation", "")
 
+            # تأكد عدد الخيارات >= 1
+            if len(options) < 2:
+                # لو الموضوع يحوي خيارات أقل، يمكن تكييفها أو إهمال السؤال
+                # ولكن نفترض أنها >= 2
+                options = ["A", "B"]
+
+            # لو correct_id خارج حدود options، صلحه
+            if correct_id < 0 or correct_id >= len(options):
+                correct_id = 0
+
             sent_msg = await context.bot.send_poll(
                 chat_id=chat_id,
                 question=q_text,
@@ -548,7 +570,7 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     quiz_id = poll_to_quiz[poll_id]
-    quizzes_data = context.chat_data[QUIZ_DATA]  
+    quizzes_data = context.chat_data[QUIZ_DATA]
     if quiz_id not in quizzes_data:
         return
 
@@ -576,6 +598,7 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     answered = user_data["answered_count"]
     correct = user_data["correct_count"]
 
+    # إذا أنهى هذا المستخدم جميع الأسئلة
     if answered == total_questions:
         correct_num = correct
         wrong_num = total_questions - correct_num
@@ -595,8 +618,6 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             text=result_msg,
             parse_mode="HTML"
         )
-        # يمكن حذف بيانات المستخدم أو تركها
-        # del quiz_info["participants"][user_id]
 
 # -------------------------------------------------
 # 14) دالة main لتشغيل البوت
