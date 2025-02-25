@@ -43,9 +43,6 @@ TOPICS_JSON_URL = f"{BASE_RAW_URL}/data/topics.json"
 
 # -------------------------------------------------
 # 4) دوال جلب البيانات من GitHub
-#    سنجلب قائمة المواضيع ثم نجلب عدد الأسئلة
-#    لكل موضوع فرعي ونخزّنه حتى نعرضه بجانب اسم
-#    الموضوع الفرعي.
 # -------------------------------------------------
 def fetch_questions(file_path: str):
     """
@@ -91,8 +88,7 @@ def fetch_topics_with_counts():
 # -------------------------------------------------
 # 5) مفاتيح حفظ الحالة واستخدامها
 # -------------------------------------------------
-# مفاتيح لحفظ بيانات الاختيار داخل user_data (أو chat_data)
-TOPICS_KEY = "topics"               # قائمة المواضيع كاملة
+TOPICS_KEY = "topics"               
 CUR_TOPIC_IDX_KEY = "current_topic_index"
 CUR_SUBTOPIC_IDX_KEY = "current_subtopic_index"
 CURRENT_STATE_KEY = "current_state"
@@ -103,41 +99,21 @@ STATE_SELECT_SUBTOPIC = "select_subtopic"
 STATE_SUBTOPIC_OPTIONS = "subtopic_options"
 STATE_ASK_NUM_QUESTIONS = "ask_num_questions"
 
-# مفاتيح أخرى
-ALL_QUESTIONS_LIST = "all_questions_list"  # لتخزين الأسئلة عند اختيار "إرسال الجميع"
-ALL_QUESTIONS_IDX = "all_questions_index"  # لتخزين الفهرس الحالي في الإرسال المجزّأ
-BOT_LAST_MESSAGE_ID = "bot_last_message_id"  # لتتبع آخر رسالة أرسلها البوت في المجموعة
+ALL_QUESTIONS_LIST = "all_questions_list"  
+ALL_QUESTIONS_IDX = "all_questions_index"  
+BOT_LAST_MESSAGE_ID = "bot_last_message_id"  
 
 # -------------------------------------------------
-# 6) إدارة الاختبارات العشوائية: سنستخدم chat_data
-#    حتى يتمكن أكثر من مستخدم من خوض الاختبار في نفس المجموعة
-#    بنفس الوقت ويحصل كل منهم على نتيجته.
+# 6) إدارة الاختبارات العشوائية (لكل مستخدم على حدة):
 # -------------------------------------------------
-QUIZ_DATA = "quizzes_data"  # مفتاح في chat_data لخزن كل الكويزات
-POLL_TO_QUIZ_ID = "poll_to_quiz_id"  # خريطة من poll_id إلى quiz_id
-QUIZ_ID_COUNTER = "quiz_id_counter"  # عدّاد لتمييز كل كويز
-
-# هيكلية تخزين الكويز في chat_data[QUIZ_DATA][quiz_id]:
-# {
-#    "poll_ids": [... list of polls belonging to this quiz ...],
-#    "correct_answers": { poll_id: correct_option_id, ... },
-#    "total": عدد_الأسئلة,
-#    "participants": {
-#        user_id: {
-#            "answered_count": 0,
-#            "correct_count": 0
-#        },
-#        ...
-#    }
-# }
+QUIZ_DATA = "quizzes_data"  
+POLL_TO_QUIZ_ID = "poll_to_quiz_id"  
+QUIZ_ID_COUNTER = "quiz_id_counter"  
 
 # -------------------------------------------------
 # 7) دوال لإنشاء الأزرار (InlineKeyboard)
 # -------------------------------------------------
 def generate_topics_inline_keyboard(topics_data):
-    """
-    إنشاء إنلاين كيبورد لقائمة المواضيع الرئيسية.
-    """
     keyboard = []
     for i, topic in enumerate(topics_data):
         btn = InlineKeyboardButton(
@@ -149,8 +125,7 @@ def generate_topics_inline_keyboard(topics_data):
 
 def generate_subtopics_inline_keyboard(topic, topic_index):
     """
-    إنشاء إنلاين كيبورد لقائمة المواضيع الفرعية + زر الرجوع.
-    سنعرض (اسم الفرع + عدد الأسئلة).
+    عرض اسم الموضوع الفرعي + عدد الأسئلة بين قوسين.
     """
     keyboard = []
     subtopics = topic.get("subTopics", [])
@@ -163,7 +138,6 @@ def generate_subtopics_inline_keyboard(topic, topic_index):
         )
         keyboard.append([btn])
 
-    # زر الرجوع لقائمة المواضيع
     back_btn = InlineKeyboardButton("« رجوع للمواضيع", callback_data="go_back_topics")
     keyboard.append([back_btn])
 
@@ -171,7 +145,7 @@ def generate_subtopics_inline_keyboard(topic, topic_index):
 
 def generate_subtopic_options_keyboard(t_idx, s_idx):
     """
-    عند اختيار موضوع فرعي، نظهر 3 أزرار:
+    3 أزرار:
       1) إرسال جميع الأسئلة
       2) تحديد عدد الأسئلة (اختبار عشوائي)
       3) رجوع
@@ -188,9 +162,6 @@ def generate_subtopic_options_keyboard(t_idx, s_idx):
     return InlineKeyboardMarkup(keyboard)
 
 def generate_send_all_next_keyboard(t_idx, s_idx):
-    """
-    زر لإرسال بقية الأسئلة في حال كانت > 100
-    """
     btn_next = InlineKeyboardButton("إرسال بقية الأسئلة »", callback_data=f"send_all_next_{t_idx}_{s_idx}")
     return InlineKeyboardMarkup([[btn_next]])
 
@@ -200,10 +171,9 @@ def generate_send_all_next_keyboard(t_idx, s_idx):
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     عند تنفيذ /start:
-    - نجلب قائمة المواضيع مع عدد الأسئلة الفرعية ونخزنها في bot_data (أو user_data).
+    - نجلب قائمة المواضيع مع عدد الأسئلة الفرعية (مرة واحدة).
     - نعرضها على شكل أزرار.
     """
-    # نجلب المواضيع مرة واحدة ونخزنها في bot_data لضمان عدم تكرار الجلب
     if "topics_cached" not in context.bot_data:
         topics_data = fetch_topics_with_counts()
         context.bot_data["topics_cached"] = topics_data
@@ -216,7 +186,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # نخزنها أيضًا في user_data للمستخدم الحالي لإدارة التصفح
     context.user_data[TOPICS_KEY] = topics_data
     context.user_data[CURRENT_STATE_KEY] = STATE_SELECT_TOPIC
 
@@ -226,7 +195,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboard
     )
 
-    # حفظ معرف رسالة البوت في حالة المجموعة
     if update.message.chat.type in ("group", "supergroup"):
         context.user_data[BOT_LAST_MESSAGE_ID] = sent_msg.message_id
 
@@ -238,8 +206,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "الأوامر المتاحة:\n"
         "/start - لبدء اختيار المواضيع\n"
         "/help - عرض هذه الرسالة\n\n"
-        "في المجموعات يمكن منادات البوت بالعبارات:\n"
-        "«بوت سوي اسئلة» أو «بوت الاسئلة» أو «بوت وينك» وسيظهر لك قائمة المواضيع.\n"
+        "في المجموعات يمكنك منادات البوت بعبارات مثل:\n"
+        "بوت سوي اسئلة - بوت الاسئلة - بوت وينك\n"
+        "وسيقوم بإظهار قائمة المواضيع للاختيار.\n"
     )
     await update.message.reply_text(help_text)
 
@@ -281,7 +250,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "go_back_topics":
         context.user_data[CURRENT_STATE_KEY] = STATE_SELECT_TOPIC
         keyboard = generate_topics_inline_keyboard(topics_data)
-
         await query.message.edit_text(
             text="اختر الموضوع الرئيسي من القائمة:",
             reply_markup=keyboard
@@ -307,7 +275,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         subtopic_name = subtopics[s_idx]["name"]
         kb = generate_subtopic_options_keyboard(t_idx, s_idx)
-
         await query.message.edit_text(
             text=f"الموضوع الفرعي: *{subtopic_name}*\n\nاختر إحدى الخيارات:",
             parse_mode="Markdown",
@@ -328,7 +295,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"اختر الموضوع الفرعي لـ: *{chosen_topic['topicName']}*\n\n"
                 f"{chosen_topic.get('description', '')}"
             )
-
             await query.message.edit_text(
                 text=msg_text,
                 parse_mode="Markdown",
@@ -339,7 +305,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 5) إرسال جميع الأسئلة (T/F) -> إعداد الإرسال المجزأ
     elif data.startswith("send_all_"):
-        _, t_idx_str, s_idx_str = data.split("_")
+        # تصحيح التقسيم:
+        # ["send","all","t_idx","s_idx"]
+        t_idx_str, s_idx_str = data.split("_")[2:]
         t_idx = int(t_idx_str)
         s_idx = int(s_idx_str)
 
@@ -347,15 +315,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_path = subtopics[s_idx]["file"]
         questions = fetch_questions(file_path)
 
-        # نخزن قائمة الأسئلة في user_data
         context.user_data[ALL_QUESTIONS_LIST] = questions
-        context.user_data[ALL_QUESTIONS_IDX] = 0  # البداية
+        context.user_data[ALL_QUESTIONS_IDX] = 0
 
-        # أرسل أول دفعة
         await send_all_questions_chunk(update, context, t_idx, s_idx)
 
     # 6) زر "إرسال بقية الأسئلة"
     elif data.startswith("send_all_next_"):
+        # ["send","all","next","t_idx","s_idx"]
         _, t_idx_str, s_idx_str = data.split("_")[2:]
         t_idx = int(t_idx_str)
         s_idx = int(s_idx_str)
@@ -371,7 +338,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data[CUR_SUBTOPIC_IDX_KEY] = s_idx
         context.user_data[CURRENT_STATE_KEY] = STATE_ASK_NUM_QUESTIONS
 
-        # إنشاء زر رجوع يعود إلى قائمة الخيارات الثلاث
         back_btn = InlineKeyboardButton(
             "« رجوع",
             callback_data=f"subtopic_{t_idx}_{s_idx}"
@@ -393,8 +359,6 @@ async def send_all_questions_chunk(update: Update, context: ContextTypes.DEFAULT
                                    t_idx: int, s_idx: int, continuation=False):
     """
     يرسل 100 سؤال (أو ما تبقى) دفعة واحدة على شكل تصويت T/F.
-    عند الانتهاء، إذا بقي أسئلة، يظهر زر لمتابعة الإرسال.
-    إذا لا يوجد أسئلة متبقية، يظهر رسالة انتهاء.
     """
     query = update.callback_query
     questions = context.user_data.get(ALL_QUESTIONS_LIST, [])
@@ -408,22 +372,18 @@ async def send_all_questions_chunk(update: Update, context: ContextTypes.DEFAULT
     end_index = min(start_index + chunk_size, len(questions))
     batch = questions[start_index:end_index]
 
-    # إذا كنا في بداية الإرسال وليس متابعة
     if not continuation:
         await query.message.edit_text("جاري إرسال الأسئلة...")
 
     chat_id = query.message.chat_id
 
-    # إرسال كل سؤال بشكل Poll T/F (بدون انتظار النتيجة)
+    # إرسال كل سؤال بشكل Poll T/F
     for q in batch:
         question_text = q.get("question", "سؤال غير متوفر").strip()
-        # إزالة الوسوم HTML
         question_text = re.sub(r"<.*?>", "", question_text)
-        correct_answer = q.get("answer", 0)  # يفترض 0 -> صح ، 1 -> خطأ
-        # لضمان بقية الحقول إن وجدت
+        correct_answer = q.get("answer", 0)
         explanation = q.get("explanation", "")
 
-        # إرسال تصويت
         await context.bot.send_poll(
             chat_id=chat_id,
             question=question_text,
@@ -436,9 +396,7 @@ async def send_all_questions_chunk(update: Update, context: ContextTypes.DEFAULT
 
     context.user_data[ALL_QUESTIONS_IDX] = end_index
 
-    # إذا انتهينا من الدفعة
     if end_index < len(questions):
-        # بقي المزيد
         kb = generate_send_all_next_keyboard(t_idx, s_idx)
         remaining = len(questions) - end_index
         await context.bot.send_message(
@@ -447,22 +405,20 @@ async def send_all_questions_chunk(update: Update, context: ContextTypes.DEFAULT
             reply_markup=kb
         )
     else:
-        # انتهينا
         await context.bot.send_message(
             chat_id=chat_id,
             text="تم الانتهاء من إرسال جميع الأسئلة."
         )
-        # إعادة الضبط
         context.user_data[ALL_QUESTIONS_LIST] = []
         context.user_data[ALL_QUESTIONS_IDX] = 0
 
 # -------------------------------------------------
-# 12) هاندلر للرسائل النصية (خاصة بعد مطالبة عدد الأسئلة + تريجر المجموعات)
+# 12) هاندلر للرسائل النصية (عدد الأسئلة + التريجر)
 # -------------------------------------------------
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_lower = update.message.text.lower()
 
-    # في المجموعات: إذا احتوت الرسالة على أي من العبارات التالية، نفذ /start
+    # تريجر في المجموعات
     if update.message.chat.type in ("group", "supergroup"):
         triggers = ["بوت سوي اسئلة", "بوت الاسئلة", "بوت وينك"]
         if any(trig in text_lower for trig in triggers):
@@ -471,23 +427,17 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_state = context.user_data.get(CURRENT_STATE_KEY, None)
 
-    # إذا كنا في مرحلة طلب عدد الأسئلة (للاختبار العشوائي)
     if user_state == STATE_ASK_NUM_QUESTIONS:
-        # التحقق هل هي رقم صحيح؟
         if not text_lower.isdigit():
-            # إذا في مجموعة، نتحقق هل هذا رد على رسالة البوت أساسًا
             if update.message.chat.type in ("group", "supergroup"):
-                # يجب الرد على آخر رسالة للبوت
                 bot_last_msg_id = context.user_data.get(BOT_LAST_MESSAGE_ID)
                 if (update.message.reply_to_message is None or
                     update.message.reply_to_message.message_id != bot_last_msg_id):
                     await update.message.reply_text("رقم غير صحيح. يجب الرد على رسالة البوت الأخيرة.")
                     return
-
             await update.message.reply_text("من فضلك أدخل رقمًا صحيحًا.")
             return
 
-        # تحقق من الرد الصحيح في المجموعات
         if update.message.chat.type in ("group", "supergroup"):
             bot_last_msg_id = context.user_data.get(BOT_LAST_MESSAGE_ID)
             if (update.message.reply_to_message is None or
@@ -502,7 +452,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         context.user_data[NUM_QUESTIONS_KEY] = num_q
 
-        # نجلب بيانات الموضوع والفرع
         topics_data = context.user_data.get(TOPICS_KEY, [])
         t_idx = context.user_data.get(CUR_TOPIC_IDX_KEY, 0)
         s_idx = context.user_data.get(CUR_SUBTOPIC_IDX_KEY, 0)
@@ -528,33 +477,31 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # خلط واختيار عينة
         random.shuffle(questions)
         selected_questions = questions[:num_q]
 
         await update.message.reply_text(
             f"سيتم إرسال {num_q} سؤال بشكل اختبار Quiz.\n"
-            "يمكن لأي شخص في المجموعة الإجابة، وكل مستخدم سيحصل على نتيجته الخاصة عند إتمامه جميع الأسئلة."
+            "يمكن لأي شخص في المجموعة الإجابة، وسيحصل كل مستخدم على نتيجته عند إكماله جميع الأسئلة."
         )
 
-        # أنشئ معرفًا فريدًا للكويز
+        chat_id = update.message.chat_id
         if QUIZ_ID_COUNTER not in context.chat_data:
             context.chat_data[QUIZ_ID_COUNTER] = 1
         quiz_id = context.chat_data[QUIZ_ID_COUNTER]
         context.chat_data[QUIZ_ID_COUNTER] += 1
 
-        # أنشئ بنية الكويز في chat_data
         if QUIZ_DATA not in context.chat_data:
             context.chat_data[QUIZ_DATA] = {}
+
         context.chat_data[QUIZ_DATA][quiz_id] = {
             "poll_ids": [],
             "correct_answers": {},
             "total": num_q,
-            "participants": {}
+            "participants": {},
+            "chat_id": chat_id
         }
 
-        # إرسال الأسئلة
-        chat_id = update.message.chat_id
         for q in selected_questions:
             q_text = re.sub(r"<.*?>", "", q.get("question", "سؤال؟")).strip()
             options = q.get("options", [])
@@ -576,34 +523,23 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.chat_data[QUIZ_DATA][quiz_id]["poll_ids"].append(pid)
                 context.chat_data[QUIZ_DATA][quiz_id]["correct_answers"][pid] = correct_id
 
-                # خريطة poll_id -> quiz_id
                 if POLL_TO_QUIZ_ID not in context.chat_data:
                     context.chat_data[POLL_TO_QUIZ_ID] = {}
                 context.chat_data[POLL_TO_QUIZ_ID][pid] = quiz_id
 
-        # إعادة ضبط الحالة
         context.user_data[CURRENT_STATE_KEY] = None
-
     else:
-        # أي رسالة أخرى لا نفعل بها شيئًا
         pass
 
 # -------------------------------------------------
 # 13) هاندلر لاستقبال إجابات المستخدم (PollAnswerHandler)
 # -------------------------------------------------
 async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    كلما أجاب مستخدم على أحد الاستفتاءات (الـ Poll),
-    نقوم بتخزين إجابته في chat_data، وعند اكتمال عدد
-    الإجابات للمستخدم (أي أجاب على كل أسئلة هذا الكويز)
-    نرسل نتيجته في المجموعة.
-    """
     poll_answer = update.poll_answer
     user_id = poll_answer.user.id
     poll_id = poll_answer.poll_id
-    selected_options = poll_answer.option_ids  # قائمة بالـ indices التي اختارها المستخدم
+    selected_options = poll_answer.option_ids
 
-    # نحتاج إلى إيجاد الكويز المرتبط بهذا الـ poll_id
     if POLL_TO_QUIZ_ID not in context.chat_data:
         return
     poll_to_quiz = context.chat_data[POLL_TO_QUIZ_ID]
@@ -612,7 +548,7 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     quiz_id = poll_to_quiz[poll_id]
-    quizzes_data = context.chat_data[QUIZ_DATA]  # dict
+    quizzes_data = context.chat_data[QUIZ_DATA]  
     if quiz_id not in quizzes_data:
         return
 
@@ -621,13 +557,11 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     total_questions = quiz_info["total"]
 
     if len(selected_options) != 1:
-        # نفترض سؤال باختيار واحد فقط
         return
 
     chosen_index = selected_options[0]
     correct_index = correct_answers_dict.get(poll_id, 0)
 
-    # تحديث بيانات المشارك
     if user_id not in quiz_info["participants"]:
         quiz_info["participants"][user_id] = {
             "answered_count": 0,
@@ -642,34 +576,10 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     answered = user_data["answered_count"]
     correct = user_data["correct_count"]
 
-    # إذا أنهى هذا المستخدم جميع الأسئلة في هذا الكويز
     if answered == total_questions:
-        # إرسال النتيجة
         correct_num = correct
         wrong_num = total_questions - correct_num
-        chat_id = poll_answer.user.id  # لو أردنا الإرسال للخاص؟
-        # المطلوب حسب الطلب: "بعد أن يُنهي المستخدم يرسل النتيجة في نفس المجموعة"
-        # لكننا لا نعرف آيدي المجموعة هنا بشكل يقيني، سنخزنها حين إرسال الكويز.
-        # الحل: نرسل إلى آخر مكان انطلقت منه الأسئلة (وهذا غالبًا المجموعة).
-        # في هذه الحالة سنحتاج حفظ chat_id للكويز أيضًا عند الإنشاء.
-        # لكي نضمن الإرسال في المجموعة الأصلية.
-
-        # بدّلنا ونخزّن chat_id في quiz_info عند إنشائه بالرسائل.
-        # ولكن الكود الحالي لا يخزن chat_id. فلنعدله:
-        # => سنفترض أننا نستخدم poll_answer.user.id للإرسال الخاص!
-        # أو نفترض أن آخر رسالة بالاختبار كانت بنفس المجموعة.
-
-        # لتبسيط التنفيذ: نرسل النتيجة في كلتا الحالتين إلى الـ user_id (خاص) إذا أردت:
-        # ولكن الطلب صريح: "في المجموعة" .. إذن نحتاج حفظه أثناء الإرسال:
-
-        # سنفعل التالي:
-        # 1) أثناء إرسال الكويز العشوائي، نخزن chat_id في quiz_info.
-        # 2) هنا نستخرجه.
-
-        group_chat_id = quiz_info.get("chat_id")
-        if not group_chat_id:
-            # إذا غير موجود، لن نستطيع الإرسال للمجموعة، سنرسل في الخاص كحل بديل
-            group_chat_id = user_id
+        group_chat_id = quiz_info.get("chat_id", user_id)
 
         user_mention = f'<a href="tg://user?id={user_id}">{poll_answer.user.first_name}</a>'
         result_msg = (
@@ -685,163 +595,12 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             text=result_msg,
             parse_mode="HTML"
         )
-        # نزيل المستخدم من participants حتى لا يعاد إرسال النتيجة مرة أخرى
-        # لو حاول إعادة التصويت (لكن غالباً لا يستطيع).
-        # على كل حال يمكننا تركها أو مسحها:
+        # يمكن حذف بيانات المستخدم أو تركها
         # del quiz_info["participants"][user_id]
 
 # -------------------------------------------------
-# 14) تعديل بسيط: عند إنشاء الكويز العشوائي نخزن chat_id
-#     لكي يستخدمه poll_answer_handler في إرسال النتيجة
+# 14) دالة main لتشغيل البوت
 # -------------------------------------------------
-# سنعدل دالة استقبال العدد (message_handler) في فقرة إنشاء الكويز:
-# ... (تم التعديل بالفعل أدناه)
-
-# -------------------------------------------------
-# 15) دالة main لتشغيل البوت
-# -------------------------------------------------
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    # ربط الأوامر
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("help", help_command))
-
-    # أزرار (CallbackQuery)
-    app.add_handler(CallbackQueryHandler(callback_handler))
-
-    # استقبال الرسائل النصية (عدد الأسئلة + تريجر المجموعات)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-
-    # استقبال أجوبة الاستفتاء (PollAnswer)
-    app.add_handler(PollAnswerHandler(poll_answer_handler))
-
-    logger.info("Bot is running...")
-    app.run_polling()
-
-# تعديل ضمن نفس الملف (نحتاجه في إنشاء الكويز):
-# سنعيد تعريف هذه الدالة هنا لكي تضمِّن chat_id في quiz_info:
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text_lower = update.message.text.lower()
-
-    # في المجموعات: إذا احتوت الرسالة على أي من العبارات التالية، نفذ /start
-    if update.message.chat.type in ("group", "supergroup"):
-        triggers = ["بوت سوي اسئلة", "بوت الاسئلة", "بوت وينك"]
-        if any(trig in text_lower for trig in triggers):
-            await start_command(update, context)
-            return
-
-    user_state = context.user_data.get(CURRENT_STATE_KEY, None)
-
-    if user_state == STATE_ASK_NUM_QUESTIONS:
-        if not text_lower.isdigit():
-            if update.message.chat.type in ("group", "supergroup"):
-                bot_last_msg_id = context.user_data.get(BOT_LAST_MESSAGE_ID)
-                if (update.message.reply_to_message is None or
-                    update.message.reply_to_message.message_id != bot_last_msg_id):
-                    await update.message.reply_text("رقم غير صحيح. يجب الرد على رسالة البوت الأخيرة.")
-                    return
-            await update.message.reply_text("من فضلك أدخل رقمًا صحيحًا.")
-            return
-
-        if update.message.chat.type in ("group", "supergroup"):
-            bot_last_msg_id = context.user_data.get(BOT_LAST_MESSAGE_ID)
-            if (update.message.reply_to_message is None or
-                update.message.reply_to_message.message_id != bot_last_msg_id):
-                await update.message.reply_text("رقم غير صحيح. يجب الرد على رسالة البوت الأخيرة.")
-                return
-
-        num_q = int(text_lower)
-        if num_q <= 0:
-            await update.message.reply_text("العدد يجب أن يكون أكبر من صفر.")
-            return
-
-        context.user_data[NUM_QUESTIONS_KEY] = num_q
-
-        topics_data = context.user_data.get(TOPICS_KEY, [])
-        t_idx = context.user_data.get(CUR_TOPIC_IDX_KEY, 0)
-        s_idx = context.user_data.get(CUR_SUBTOPIC_IDX_KEY, 0)
-
-        if t_idx < 0 or t_idx >= len(topics_data):
-            await update.message.reply_text("خطأ في اختيار الموضوع.")
-            return
-
-        subtopics = topics_data[t_idx].get("subTopics", [])
-        if s_idx < 0 or s_idx >= len(subtopics):
-            await update.message.reply_text("خطأ في اختيار الموضوع الفرعي.")
-            return
-
-        file_path = subtopics[s_idx]["file"]
-        questions = fetch_questions(file_path)
-        if not questions:
-            await update.message.reply_text("لم أتمكن من جلب أسئلة لهذا الموضوع الفرعي.")
-            return
-
-        if num_q > len(questions):
-            await update.message.reply_text(
-                f"الأسئلة غير كافية. العدد المتاح هو: {len(questions)}"
-            )
-            return
-
-        random.shuffle(questions)
-        selected_questions = questions[:num_q]
-
-        await update.message.reply_text(
-            f"سيتم إرسال {num_q} سؤال بشكل اختبار Quiz.\n"
-            "يمكن لأي شخص في المجموعة الإجابة، وسيحصل كل مستخدم على نتيجته عند إكماله كل الأسئلة."
-        )
-
-        # تجهيز الكويز في chat_data
-        chat_id = update.message.chat_id
-        if QUIZ_ID_COUNTER not in context.chat_data:
-            context.chat_data[QUIZ_ID_COUNTER] = 1
-        quiz_id = context.chat_data[QUIZ_ID_COUNTER]
-        context.chat_data[QUIZ_ID_COUNTER] += 1
-
-        if QUIZ_DATA not in context.chat_data:
-            context.chat_data[QUIZ_DATA] = {}
-
-        context.chat_data[QUIZ_DATA][quiz_id] = {
-            "poll_ids": [],
-            "correct_answers": {},
-            "total": num_q,
-            "participants": {},
-            "chat_id": chat_id  # حفظ معرف المجموعة/المكان
-        }
-
-        # إرسال الأسئلة
-        for q in selected_questions:
-            q_text = re.sub(r"<.*?>", "", q.get("question", "سؤال؟")).strip()
-            options = q.get("options", [])
-            correct_id = q.get("answer", 0)
-            explanation = q.get("explanation", "")
-
-            sent_msg = await context.bot.send_poll(
-                chat_id=chat_id,
-                question=q_text,
-                options=options,
-                type=Poll.QUIZ,
-                correct_option_id=correct_id,
-                explanation=explanation,
-                is_anonymous=False
-            )
-
-            if sent_msg.poll:
-                pid = sent_msg.poll.id
-                context.chat_data[QUIZ_DATA][quiz_id]["poll_ids"].append(pid)
-                context.chat_data[QUIZ_DATA][quiz_id]["correct_answers"][pid] = correct_id
-
-                if POLL_TO_QUIZ_ID not in context.chat_data:
-                    context.chat_data[POLL_TO_QUIZ_ID] = {}
-                context.chat_data[POLL_TO_QUIZ_ID][pid] = quiz_id
-
-        # إعادة ضبط الحالة
-        context.user_data[CURRENT_STATE_KEY] = None
-
-    else:
-        # لا شيء
-        pass
-
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
