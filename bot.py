@@ -130,8 +130,8 @@ def generate_subtopics_inline_keyboard(topic, topic_index):
 def generate_subtopic_actions_keyboard(topic_index, sub_index):
     """
     عند اختيار موضوع فرعي، نعرض 3 أزرار:
-    1) إرسال جميع الأسئلة (Poll REGULAR).
-    2) تحديد عدد الأسئلة (اختبار عشوائي بميزة الصح/الخطأ).
+    1) إرسال جميع الأسئلة (Poll QUIZ) لكن بدون تسجيل نتيجة نهائية.
+    2) تحديد عدد الأسئلة (اختبار عشوائي) مع تسجيل نتيجة نهائية لكل مستخدم.
     3) زر الرجوع لقائمة المواضيع الفرعية.
     """
     keyboard = [
@@ -310,7 +310,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # إرسال جميع الأسئلة (Poll REGULAR) - البداية (start)
+    # إرسال جميع الأسئلة (Poll QUIZ) - البداية (start)
     if data.startswith("send_all_") and data.endswith("_start"):
         # مثال data: send_all_{t_idx}_{s_idx}_start
         parts = data.split("_")
@@ -328,16 +328,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_all_questions_in_chunks(query, context, t_idx, s_idx, chunk_index)
         return
 
-    # إرسال جميع الأسئلة (Poll REGULAR) - الدفعات التالية
+    # إرسال جميع الأسئلة (Poll QUIZ) - الدفعات التالية
+    # قد يكون data: send_all_{t_idx}_{s_idx}_{chunk_index}
     if data.startswith("send_all_"):
-        # قد يكون data: send_all_{t_idx}_{s_idx}_{chunk_index}
         parts = data.split("_")
         if len(parts) == 5:
-            # ["send","all", t_idx, s_idx, chunk_index]
             t_idx = int(parts[2])
             s_idx = int(parts[3])
             chunk_index = int(parts[4])
-
             await query.message.edit_text("جاري إرسال الدفعة التالية...")
             await send_all_questions_in_chunks(query, context, t_idx, s_idx, chunk_index)
         return
@@ -349,26 +347,36 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         t_idx = int(t_idx_str)
         s_idx = int(s_idx_str)
 
-        # نطلب من المستخدم إدخال العدد بالرد على هذه الرسالة
+        # نحذف الرسالة السابقة حتى يظهر للمستخدم رسالة جديدة
+        await query.message.delete()
+
+        # نرسل رسالة جديدة للمستخدم
+        new_msg = await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="أرسل عدد الأسئلة المطلوبة (بالرد على هذه الرسالة)."
+        )
+
+        # ضبط الحالة
         context.user_data[CURRENT_STATE_KEY] = STATE_WAITING_RANDOM_NUMBER
         context.user_data[CUR_TOPIC_IDX_KEY] = t_idx
         context.user_data[CUR_SUBTOPIC_IDX_KEY] = s_idx
 
-        # نمسح الكيبورد السابقة ونضع رسالة جديدة
-        await query.message.edit_text(
-            text="أرسل عدد الأسئلة المطلوبة (ردًا على هذه الرسالة)."
-        )
-        # نخزّن الـ message_id حتى لا نقبل مدخلات إلا بالرد عليه
-        context.chat_data[WAITING_FOR_REPLY_MSG_ID] = query.message.message_id
+        # نخزّن الـ message_id الجديد حتى لا نقبل مدخلات إلا بالرد عليه
+        context.chat_data[WAITING_FOR_REPLY_MSG_ID] = new_msg.message_id
+
         return
 
     # إذا لم نفهم الخيار
     await query.message.reply_text("لم أفهم هذا الخيار.")
 
 # -------------------------------------------------
-# 9) دالة إرسال جميع الأسئلة على دفعات (Regular Poll)
+# 9) دالة إرسال جميع الأسئلة على دفعات (Quiz Poll بدون نتيجة نهائية)
 # -------------------------------------------------
 async def send_all_questions_in_chunks(query, context, t_idx, s_idx, chunk_index):
+    """
+    يرسل جميع الأسئلة كـ Poll QUIZ (مع خيار صحيح) ولكن
+    بدون حفظ النتائج (لا يوجد scoreboard).
+    """
     chat_id = query.message.chat_id
     questions = context.user_data.get(CUR_SUBTOPIC_QUESTIONS, [])
     total_questions = len(questions)
@@ -386,27 +394,37 @@ async def send_all_questions_in_chunks(query, context, t_idx, s_idx, chunk_index
         )
         return
 
-    # إرسال كل سؤال كـ Poll REGULAR بدون صح/خطأ
+    # إرسال كل سؤال كـ Poll QUIZ - مع correct_option_id من JSON
     for q in subset:
         q_text = re.sub(r"<.*?>", "", q.get("question", "سؤال بدون نص")).strip()
         options = q.get("options", [])
+        correct_id = q.get("answer", 0)
+        explanation = q.get("explanation", "")
 
-        # Poll عادي
-        await context.bot.send_poll(
-            chat_id=chat_id,
-            question=q_text,
-            options=options,
-            is_anonymous=False,
-            type=Poll.REGULAR
-        )
+        # نرسل الاستطلاع
+        try:
+            await context.bot.send_poll(
+                chat_id=chat_id,
+                question=q_text,
+                options=options,
+                type=Poll.QUIZ,
+                correct_option_id=correct_id,
+                explanation=explanation,
+                is_anonymous=False
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send poll: {e}")
+            # في حال حدوث خطأ يمكن تجاوز السؤال أو إعادة المحاولة
+            pass
 
-        await asyncio.sleep(0.3)  # فاصل زمني بسيط لتفادي مشاكل التليجرام
+        # تأخير لتفادي مشاكل Flood
+        await asyncio.sleep(1.0)
 
     # إذا بقيت أسئلة بعدها، نعرض زر المتابعة
     if end_idx < total_questions:
         next_chunk = chunk_index + 1
         kb = generate_send_all_continue_keyboard(t_idx, s_idx, next_chunk)
-        sent_msg = await context.bot.send_message(
+        await context.bot.send_message(
             chat_id=chat_id,
             text=f"تم إرسال {len(subset)} سؤال. هل تريد المتابعة؟",
             reply_markup=kb
@@ -436,11 +454,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if current_state == STATE_WAITING_RANDOM_NUMBER:
         waiting_msg_id = context.chat_data.get(WAITING_FOR_REPLY_MSG_ID)
         if not waiting_msg_id:
-            # غير مهيأ
             return
 
-        # يجب أن تكون الرسالة ردًا على رسالة البوت
-        if (not update.message.reply_to_message) or (update.message.reply_to_message.message_id != waiting_msg_id):
+        # يجب أن تكون الرسالة ردًا على الرسالة التي تحمل waiting_msg_id
+        if not update.message.reply_to_message or update.message.reply_to_message.message_id != waiting_msg_id:
             await update.message.reply_text("رقم غير صحيح. يجب الرد على رسالة البوت الأخيرة.")
             return
 
@@ -486,27 +503,31 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         context.chat_data[ACTIVE_QUIZ_KEY] = active_quiz
 
-        # إرسال الأسئلة بشكل Quiz
+        # إرسال الأسئلة بشكل Quiz مع حساب النتائج
         for q in selected:
             q_text = re.sub(r"<.*?>", "", q.get("question", "سؤال بدون نص")).strip()
             options = q.get("options", [])
             correct_id = q.get("answer", 0)
             explanation = q.get("explanation", "")
 
-            poll_msg = await context.bot.send_poll(
-                chat_id=chat_id,
-                question=q_text,
-                options=options,
-                type=Poll.QUIZ,
-                correct_option_id=correct_id,
-                explanation=explanation,
-                is_anonymous=False
-            )
-            if poll_msg.poll is not None:
-                poll_id = poll_msg.poll.id
-                active_quiz["poll_correct_answers"][poll_id] = correct_id
+            try:
+                poll_msg = await context.bot.send_poll(
+                    chat_id=chat_id,
+                    question=q_text,
+                    options=options,
+                    type=Poll.QUIZ,
+                    correct_option_id=correct_id,
+                    explanation=explanation,
+                    is_anonymous=False
+                )
+                if poll_msg.poll is not None:
+                    poll_id = poll_msg.poll.id
+                    active_quiz["poll_correct_answers"][poll_id] = correct_id
+            except Exception as e:
+                logger.warning(f"Failed to send poll (quiz mode): {e}")
 
-            await asyncio.sleep(0.3)
+            # تأخير لتفادي مشاكل Flood
+            await asyncio.sleep(1.0)
 
         return
 
@@ -522,6 +543,7 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = poll_answer.user.id
     chosen_options = poll_answer.option_ids
 
+    # تحقق هل لدينا اختبار عشوائي نشط في هذه الدردشة
     active_quiz = context.chat_data.get(ACTIVE_QUIZ_KEY)
     if not active_quiz:
         return  # لا يوجد اختبار حالي
@@ -553,7 +575,7 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         else:
             user_data["wrong_count"] += 1
 
-    # تحديت الداتا
+    # تحديث
     active_quiz["users"][user_id] = user_data
 
     # إذا المستخدم أكمل كل الأسئلة
@@ -576,9 +598,6 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                 text=msg,
                 parse_mode="HTML"
             )
-        else:
-            # إذا لم يتوفر لدينا chat_id
-            pass
 
 # -------------------------------------------------
 # 12) دالة main لتشغيل البوت
