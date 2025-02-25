@@ -307,7 +307,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.message.edit_text("خيار غير صحيح.")
 
-    # 5) إرسال جميع الأسئلة (T/F) -> إعداد الإرسال المجزأ
+    # 5) إرسال جميع الأسئلة (كنص مع توضيح الإجابة الصحيحة)
     elif data.startswith("send_all_"):
         # ["send","all","t_idx","s_idx"]
         _, _, t_idx_str, s_idx_str = data.split("_", 3)
@@ -331,7 +331,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         s_idx = int(s_idx_str)
         await send_all_questions_chunk(update, context, t_idx, s_idx, continuation=True)
 
-    # 7) تحديد عدد الأسئلة (عشوائي)
+    # 7) تحديد عدد الأسئلة (عشوائي) -> سيتم اختبار Quiz
     elif data.startswith("ask_random_"):
         # ["ask","random","t_idx","s_idx"]
         _, _, t_idx_str, s_idx_str = data.split("_", 3)
@@ -357,12 +357,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("لم أفهم هذا الخيار.")
 
 # -------------------------------------------------
-# 11) دالة مساعدة لإرسال الأسئلة على شكل T/F مجزأة
+# 11) دالة مساعدة لإرسال الأسئلة كنص مع ذكر الإجابة الصحيحة (مجزأة)
 # -------------------------------------------------
 async def send_all_questions_chunk(update: Update, context: ContextTypes.DEFAULT_TYPE,
                                    t_idx: int, s_idx: int, continuation=False):
     """
-    يرسل 100 سؤال (أو ما تبقى) دفعة واحدة على شكل تصويت T/F.
+    يرسل 100 سؤال (أو ما تبقى) دفعة واحدة بشكل *رسائل نصية*.
+    - يظهر نص السؤال
+    - يظهر خياراته (إن وُجدت)
+    - يظهر في الأخير الجواب الصحيح
     """
     query = update.callback_query
     questions = context.user_data.get(ALL_QUESTIONS_LIST, [])
@@ -377,36 +380,38 @@ async def send_all_questions_chunk(update: Update, context: ContextTypes.DEFAULT
     batch = questions[start_index:end_index]
 
     if not continuation:
-        # تحرير رسالة زر الإرسال ليكون واضحًا أننا سنبدأ الإرسال
+        # عدّل الرسالة السابقة لتوضيح أننا نبدأ الإرسال
         await query.message.edit_text("جاري إرسال الأسئلة...")
 
     chat_id = query.message.chat_id
 
-    # إرسال كل سؤال بشكل Poll T/F
-    for q in batch:
-        question_text = q.get("question", "سؤال غير متوفر").strip()
-        question_text = re.sub(r"<.*?>", "", question_text)
-        correct_answer = q.get("answer", 0)
-        explanation = q.get("explanation", "")
+    # إرسال كل سؤال بشكل نصي
+    for idx, q in enumerate(batch, start=start_index+1):
+        raw_q_text = q.get("question", "سؤال غير متوفر").strip()
+        raw_q_text = re.sub(r"<.*?>", "", raw_q_text)  # إزالة أي وسوم HTML
 
-        # تأكد أن correct_answer=0 أو 1 فقط بما يناسب خيارات ["صح", "خطأ"]
-        # إذا كان خارج النطاق، سيتم تجاهله أو يسبب خطأ من تيليجرام
-        if correct_answer not in (0, 1):
-            correct_answer = 0
+        options = q.get("options", [])
+        correct_idx = q.get("answer", 0)
+        # ضمان أن المؤشر صحيح
+        if correct_idx < 0 or correct_idx >= len(options):
+            correct_idx = 0
 
-        await context.bot.send_poll(
-            chat_id=chat_id,
-            question=question_text,
-            options=["صح", "خطأ"],
-            type=Poll.QUIZ,
-            correct_option_id=correct_answer,
-            explanation=explanation,
-            is_anonymous=False
-        )
+        correct_answer_text = "غير محدد"
+        if options:
+            correct_answer_text = options[correct_idx]
+
+        # بناء نص الرسالة
+        msg_text = f"سؤال #{idx}:\n{raw_q_text}\n\n"
+        for i, opt in enumerate(options):
+            msg_text += f"  {i+1}) {opt}\n"
+        msg_text += f"\nالإجابة الصحيحة: {correct_answer_text}"
+
+        await context.bot.send_message(chat_id=chat_id, text=msg_text)
 
     context.user_data[ALL_QUESTIONS_IDX] = end_index
 
     if end_index < len(questions):
+        # لا تزال هناك بقية
         kb = generate_send_all_next_keyboard(t_idx, s_idx)
         remaining = len(questions) - end_index
         await context.bot.send_message(
@@ -416,6 +421,7 @@ async def send_all_questions_chunk(update: Update, context: ContextTypes.DEFAULT
             reply_markup=kb
         )
     else:
+        # انتهينا
         await context.bot.send_message(
             chat_id=chat_id,
             text="تم الانتهاء من إرسال جميع الأسئلة."
@@ -438,24 +444,12 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_state = context.user_data.get(CURRENT_STATE_KEY, None)
 
+    # خاصّ بمرحلة "تحديد عدد الأسئلة" (للاختبار العشوائي)
     if user_state == STATE_ASK_NUM_QUESTIONS:
+        # لا نتحقق من كون المستخدم رد على رسالة البوت الأخيرة، فقط نتأكد من كونه رقمًا
         if not text_lower.isdigit():
-            if update.message.chat.type in ("group", "supergroup"):
-                bot_last_msg_id = context.user_data.get(BOT_LAST_MESSAGE_ID)
-                # يجب الرد على رسالة البوت الأخيرة
-                if (update.message.reply_to_message is None or
-                    update.message.reply_to_message.message_id != bot_last_msg_id):
-                    await update.message.reply_text("رقم غير صحيح. يجب الرد على رسالة البوت الأخيرة.")
-                    return
             await update.message.reply_text("من فضلك أدخل رقمًا صحيحًا.")
             return
-
-        if update.message.chat.type in ("group", "supergroup"):
-            bot_last_msg_id = context.user_data.get(BOT_LAST_MESSAGE_ID)
-            if (update.message.reply_to_message is None or
-                update.message.reply_to_message.message_id != bot_last_msg_id):
-                await update.message.reply_text("رقم غير صحيح. يجب الرد على رسالة البوت الأخيرة.")
-                return
 
         num_q = int(text_lower)
         if num_q <= 0:
@@ -514,19 +508,18 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "chat_id": chat_id
         }
 
+        # إرسال الأسئلة على شكل Poll (Quiz)
         for q in selected_questions:
             q_text = re.sub(r"<.*?>", "", q.get("question", "سؤال؟")).strip()
             options = q.get("options", [])
             correct_id = q.get("answer", 0)
             explanation = q.get("explanation", "")
 
-            # تأكد عدد الخيارات >= 1
+            # تأكد أن لدى السؤال خيارات
             if len(options) < 2:
-                # لو الموضوع يحوي خيارات أقل، يمكن تكييفها أو إهمال السؤال
-                # ولكن نفترض أنها >= 2
                 options = ["A", "B"]
 
-            # لو correct_id خارج حدود options، صلحه
+            # تصحيح المؤشر إن لزم
             if correct_id < 0 or correct_id >= len(options):
                 correct_id = 0
 
