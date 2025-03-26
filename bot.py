@@ -357,7 +357,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 poll_ids.append(pid)
                 poll_correct_answers[pid] = correct_id
 
-            # انتظار ثانيتين لتفادي أي مشكلة في إرسال الاستفتاءات بسرعة
+            # انتظار قصير لتفادي أي مشكلة في إرسال الاستفتاءات بسرعة
             await asyncio.sleep(1)
 
         # تخزين بيانات الكويز
@@ -456,3 +456,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
