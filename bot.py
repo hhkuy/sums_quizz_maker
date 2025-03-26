@@ -132,7 +132,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     عند تنفيذ /start:
     - نعرض زرين: 1) اختر كويز جاهز. 2) أنشئ كويز مخصص.
-    - عند ضغط أحدهما سيتم التحويل إلى المنطق المناسب (عبر callback_data).
     """
     keyboard = [
         [
@@ -148,12 +147,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # -------------------------------------------------
-# 8.1) دالة الأصلية لجلب المواضيع وعرضها (كانت في start_command سابقًا)
+# 8.1) المنطق الأصلي لجلب المواضيع وعرضها كان في start_command سابقًا
+#     (الآن نستدعيه عند الضغظ على زر "اختر كويز جاهز").
 # -------------------------------------------------
 async def start_command_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     المنطق الأصلي لجلب المواضيع من GitHub وعرضها (المواضيع الرئيسية).
-    هذا ما كان يفعله /start في الكود السابق تمامًا.
     """
     topics_data = fetch_topics()
     context.user_data[TOPICS_KEY] = topics_data
@@ -195,12 +194,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # زر "اختر كويز جاهز" من /start
     if data == "start_ready_quiz":
-        # نريد تنفيذ المنطق الأصلي في start_command_flow
-        # ولكن هناك مشكلة بسيطة: start_command_flow يحتاج update.message.
-        # في الكولباك لا يوجد update.message وإنما update.callback_query.message.
-        # يمكننا تمريرها يدوياً أو نعيد كتابة المنطق. 
-        # أبسط حل: نستدعي دالة فرعية تعيد لنا التوبيكات ثم نرسل الرد. أو نستخدم طريقة آمنة.
-        # سننفذ نفس الأكواد يدويًا هنا:
+        # نستدعي المنطق الأصلي الذي يعرض المواضيع
+        # ولكن لا نملك update.message هنا، بل query.message
+        # سننفذ نفس الأكواد يدويًا: جلب التوبيكات ثم إرسالها
         topics_data = fetch_topics()
         context.user_data[TOPICS_KEY] = topics_data
         if not topics_data:
@@ -218,7 +214,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # زر "أنشئ كويز مخصص" من /start
     elif data == "start_custom_quiz":
-        # نريد استدعاء create_custom_quiz_command
+        # نريد استدعاء create_custom_quiz_command_from_callback
         await create_custom_quiz_command_from_callback(query, context)
         return
 
@@ -267,7 +263,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data[CUR_SUBTOPIC_IDX_KEY] = s_idx
         context.user_data[CURRENT_STATE_KEY] = STATE_ASK_NUM_QUESTIONS
 
-        # زر رجوع لقائمة المواضيع الفرعية
         back_btn = InlineKeyboardButton(
             "« رجوع للمواضيع الفرعية",
             callback_data=f"go_back_subtopics_{t_idx}"
@@ -306,187 +301,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.message.reply_text("لم أفهم هذا الخيار.")
 
-
 # -------------------------------------------------
-# 11) هاندلر للرسائل النصية (لعدد الأسئلة) أو لتريجر في المجموعة
+# 11) هاندلر خاص بالأسئلة المخصصة
 # -------------------------------------------------
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # إذا كانت الرسالة في مجموعة وتتضمن إحدى العبارات التالية، نبدأ /start
-    if update.message.chat.type in ("group", "supergroup"):
-        text_lower = update.message.text.lower()
-        triggers = ["بوت سوي اسئلة", "بوت الاسئلة", "بوت وينك"]
-        if any(trig in text_lower for trig in triggers):
-            # كأننا نفذنا /start
-            await start_command(update, context)
-            return
-
-    user_state = context.user_data.get(CURRENT_STATE_KEY, None)
-
-    # إذا كنا في مرحلة طلب عدد الأسئلة
-    if user_state == STATE_ASK_NUM_QUESTIONS:
-        text = update.message.text.strip()
-        if not text.isdigit():
-            await update.message.reply_text("من فضلك أدخل رقمًا صحيحًا.")
-            return
-
-        num_q = int(text)
-        if num_q <= 0:
-            await update.message.reply_text("العدد يجب أن يكون أكبر من صفر.")
-            return
-
-        context.user_data[NUM_QUESTIONS_KEY] = num_q
-        context.user_data[CURRENT_STATE_KEY] = STATE_SENDING_QUESTIONS
-
-        # جلب البيانات اللازمة
-        topics_data = context.user_data.get(TOPICS_KEY, [])
-        t_idx = context.user_data.get(CUR_TOPIC_IDX_KEY, 0)
-        s_idx = context.user_data.get(CUR_SUBTOPIC_IDX_KEY, 0)
-
-        if t_idx < 0 or t_idx >= len(topics_data):
-            await update.message.reply_text("خطأ في اختيار الموضوع.")
-            return
-
-        subtopics = topics_data[t_idx].get("subTopics", [])
-        if s_idx < 0 or s_idx >= len(subtopics):
-            await update.message.reply_text("خطأ في اختيار الموضوع الفرعي.")
-            return
-
-        # المسار الخاص بملف الأسئلة
-        file_path = subtopics[s_idx]["file"]
-        questions = fetch_questions(file_path)
-        if not questions:
-            await update.message.reply_text("لم أتمكن من جلب أسئلة لهذا الموضوع الفرعي.")
-            return
-
-        # التحقق من توفر العدد المطلوب من الأسئلة
-        if num_q > len(questions):
-            await update.message.reply_text(
-                f"الأسئلة غير كافية. العدد المتاح هو: {len(questions)}"
-            )
-            return
-
-        # اختيار الأسئلة عشوائيًا
-        random.shuffle(questions)
-        selected_questions = questions[:num_q]
-
-        # إعلام المستخدم
-        await update.message.reply_text(
-            f"سيتم إرسال {num_q} سؤال(أسئلة) على شكل استفتاء (Quiz). بالتوفيق!"
-        )
-
-        # سنخزن بيانات الكويز في user_data لتتبع الإجابات
-        poll_ids = []
-        poll_correct_answers = {}
-        owner_id = update.message.from_user.id
-        chat_id = update.message.chat_id
-
-        # إرسال كل سؤال
-        for idx, q in enumerate(selected_questions, start=1):
-            # إزالة أي وسوم HTML من نص السؤال
-            raw_question = q.get("question", "سؤال بدون نص!")
-            clean_question = re.sub(r"<.*?>", "", raw_question).strip()
-            # مثال: إدخال فاصل بعد كلمة "Question X" إن وجدت
-            clean_question = re.sub(r"(Question\s*\d+)", r"\1 -", clean_question)
-
-            options = q.get("options", [])
-            correct_id = q.get("answer", 0)  # غالبًا 0-based
-            explanation = q.get("explanation", "")
-
-            # إرسال الاستفتاء
-            sent_msg = await context.bot.send_poll(
-                chat_id=chat_id,
-                question=clean_question,
-                options=options,
-                type=Poll.QUIZ,
-                correct_option_id=correct_id,
-                explanation=explanation,  # سيظهر للمستخدم كـ Hint عند اختيار الإجابة
-                is_anonymous=False
-            )
-
-            if sent_msg.poll is not None:
-                pid = sent_msg.poll.id
-                poll_ids.append(pid)
-                poll_correct_answers[pid] = correct_id
-
-            # انتظار قصير لتفادي أي مشكلة في إرسال الاستفتاءات بسرعة
-            await asyncio.sleep(1)
-
-        # تخزين بيانات الكويز
-        context.user_data[ACTIVE_QUIZ_KEY] = {
-            "owner_id": owner_id,
-            "chat_id": chat_id,
-            "poll_ids": poll_ids,
-            "poll_correct_answers": poll_correct_answers,
-            "total": num_q,
-            "correct_count": 0,
-            "wrong_count": 0,
-            "answered_count": 0
-        }
-
-        # يمكن إعادة ضبط الحالة
-        context.user_data[CURRENT_STATE_KEY] = None
-
-    else:
-        # أي رسالة أخرى لا نفعل بها شيئًا (ما لم تكن من ضمن التريجر في المجموعات)
-        pass
-
-# -------------------------------------------------
-# 12) هاندلر لاستقبال إجابات المستخدم (PollAnswerHandler)
-# -------------------------------------------------
-async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    poll_answer = update.poll_answer
-    user_id = poll_answer.user.id
-    poll_id = poll_answer.poll_id
-    selected_options = poll_answer.option_ids  # قائمة بالـ indices التي اختارها المستخدم
-
-    quiz_data = context.user_data.get(ACTIVE_QUIZ_KEY)
-    if not quiz_data:
-        return  # لا يوجد كويز فعال حاليًا
-
-    # تحقق هل هذا الاستفتاء ينتمي للكويز الذي أطلقه المستخدم
-    if poll_id not in quiz_data["poll_ids"]:
-        return
-
-    # نسمح فقط لصاحب الطلب بحساب النتيجة (يمكن توسيعها لاحقًا)
-    if user_id != quiz_data["owner_id"]:
-        return
-
-    # يفترض أنه Quiz باختيار واحد؛ لو تعدد فالأمر مختلف
-    if len(selected_options) == 1:
-        chosen_index = selected_options[0]
-        correct_option_id = quiz_data["poll_correct_answers"][poll_id]
-
-        quiz_data["answered_count"] += 1
-        if chosen_index == correct_option_id:
-            quiz_data["correct_count"] += 1
-        else:
-            quiz_data["wrong_count"] += 1
-
-        # إذا المستخدم أنهى الإجابة على كل الأسئلة
-        if quiz_data["answered_count"] == quiz_data["total"]:
-            correct = quiz_data["correct_count"]
-            wrong = quiz_data["wrong_count"]
-            total = quiz_data["total"]
-            user_mention = f'<a href="tg://user?id={user_id}">{poll_answer.user.first_name}</a>'
-            msg = (
-                f"تم الانتهاء من الإجابة على {total} سؤال بواسطة {user_mention}.\n"
-                f"الإجابات الصحيحة: {correct}\n"
-                f"الإجابات الخاطئة: {wrong}\n"
-                f"النتيجة النهائية: {correct} / {total}\n"
-            )
-            await context.bot.send_message(
-                chat_id=quiz_data["chat_id"],
-                text=msg,
-                parse_mode="HTML"
-            )
-            # مسح بيانات الكويز بعد الانتهاء
-            context.user_data[ACTIVE_QUIZ_KEY] = None
-
-
-# -------------------------------------------------
-# 13) دوال الاختبار المخصص
-# -------------------------------------------------
-
 CUSTOM_QUIZ_STATE = "custom_quiz_state"
 ACTIVE_CUSTOM_QUIZ_KEY = "active_custom_quiz"
 
@@ -494,7 +311,7 @@ ACTIVE_CUSTOM_QUIZ_KEY = "active_custom_quiz"
 async def create_custom_quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     أمر صريح: /create_custom_quiz
-    يعرض تعليمات حول كيفية إرسال الأسئلة مع *** لتمييز الإجابة الصحيحة.
+    يعرض التعليمات حول كيفية إرسال الأسئلة مع *** لتمييز الإجابة الصحيحة.
     """
     instructions = (
         "مرحبًا! لإنشاء اختبار مخصص، الرجاء إرسال الأسئلة جميعها في رسالة واحدة بالشكل التالي:\n\n"
@@ -555,78 +372,18 @@ async def create_custom_quiz_command_from_callback(query, context: ContextTypes.
 
 
 async def custom_quiz_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    زر 'إلغاء' أو أي أوامر مرتبطة بالكويز المخصص عبر CallbackQuery.
+    """
     query = update.callback_query
     await query.answer()
     data = query.data
 
     if data == "cancel_custom_quiz":
-        # إلغاء العملية والعودة
         context.user_data[CURRENT_STATE_KEY] = None
         await query.message.edit_text("تم الإلغاء. يمكنك استخدام /create_custom_quiz مجددًا لاحقًا.")
     else:
         await query.message.reply_text("خيار غير مفهوم.")
-
-
-async def custom_quiz_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    إذا كان المستخدم في وضع إنشاء اختبار مخصص (CUSTOM_QUIZ_STATE)،
-    نقوم بتحليل نص الرسالة لاستخراج الأسئلة وإرسالها كاستبيانات (Quiz).
-    """
-    user_state = context.user_data.get(CURRENT_STATE_KEY, None)
-    if user_state != CUSTOM_QUIZ_STATE:
-        return  # ليس في وضع إنشاء اختبار مخصص
-
-    text = update.message.text
-    questions_data = parse_custom_questions(text)
-
-    if not questions_data:
-        await update.message.reply_text("لم يتم العثور على أسئلة بالصيغة المطلوبة. تأكد من التنسيق.")
-        return
-
-    # سنخزن بيانات الكويز المخصص
-    poll_ids = []
-    poll_correct_answers = {}
-    owner_id = update.message.from_user.id
-    chat_id = update.message.chat_id
-
-    # إرسال الأسئلة على شكل Poll
-    for item in questions_data:
-        question_text = item["question_text"]
-        options = item["options"]
-        correct_index = item["correct_index"]
-        explanation = item["explanation"]
-
-        # إنشاء الاستفتاء
-        sent_msg = await context.bot.send_poll(
-            chat_id=chat_id,
-            question=question_text,
-            options=options,
-            type=Poll.QUIZ,
-            correct_option_id=correct_index,
-            explanation=explanation,
-            is_anonymous=False
-        )
-
-        if sent_msg.poll is not None:
-            pid = sent_msg.poll.id
-            poll_ids.append(pid)
-            poll_correct_answers[pid] = correct_index
-
-        await asyncio.sleep(1)  # تأخير بسيط بين كل استفتاء
-
-    context.user_data[ACTIVE_CUSTOM_QUIZ_KEY] = {
-        "owner_id": owner_id,
-        "chat_id": chat_id,
-        "poll_ids": poll_ids,
-        "poll_correct_answers": poll_correct_answers,
-        "total": len(questions_data),
-        "correct_count": 0,
-        "wrong_count": 0,
-        "answered_count": 0
-    }
-
-    context.user_data[CURRENT_STATE_KEY] = None
-    await update.message.reply_text(f"تم إنشاء {len(questions_data)} سؤال(أسئلة) بنجاح!")
 
 
 def parse_custom_questions(text: str):
@@ -670,7 +427,7 @@ def parse_custom_questions(text: str):
         line = line.rstrip()
         qmatch = question_pattern.match(line)
         if qmatch:
-            # سؤال جديد
+            # إذا وُجد سؤال سابق لم يُحفظ بعد، نخزنه
             save_current_question()
             current_question = qmatch.group(2)
             current_options = []
@@ -698,12 +455,232 @@ def parse_custom_questions(text: str):
         if current_question is not None and not omatch and not qmatch:
             current_question += " " + line
 
-    # آخر سؤال
+    # حفظ آخر سؤال إن وجد
     save_current_question()
 
     return questions_data
 
 
+async def custom_quiz_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    إذا كان المستخدم في وضع إنشاء اختبار مخصص (CUSTOM_QUIZ_STATE)،
+    نقوم بتحليل نص الرسالة واستخراج الأسئلة وإرسالها كاستبيانات (Quiz).
+    """
+    user_state = context.user_data.get(CURRENT_STATE_KEY, None)
+    if user_state != CUSTOM_QUIZ_STATE:
+        return  # ليس في وضع إنشاء اختبار مخصص، لا نفعل شيئًا
+
+    text = update.message.text
+    questions_data = parse_custom_questions(text)
+
+    if not questions_data:
+        await update.message.reply_text("لم يتم العثور على أسئلة بالصيغة المطلوبة. تأكد من التنسيق.")
+        return
+
+    poll_ids = []
+    poll_correct_answers = {}
+    owner_id = update.message.from_user.id
+    chat_id = update.message.chat_id
+
+    # إرسال الأسئلة على شكل Poll
+    for item in questions_data:
+        question_text = item["question_text"]
+        options = item["options"]
+        correct_index = item["correct_index"]
+        explanation = item["explanation"]
+
+        sent_msg = await context.bot.send_poll(
+            chat_id=chat_id,
+            question=question_text,
+            options=options,
+            type=Poll.QUIZ,
+            correct_option_id=correct_index,
+            explanation=explanation,
+            is_anonymous=False
+        )
+        if sent_msg.poll is not None:
+            pid = sent_msg.poll.id
+            poll_ids.append(pid)
+            poll_correct_answers[pid] = correct_index
+
+        await asyncio.sleep(1)  # تأخير بسيط بين كل استفتاء
+
+    context.user_data[ACTIVE_CUSTOM_QUIZ_KEY] = {
+        "owner_id": owner_id,
+        "chat_id": chat_id,
+        "poll_ids": poll_ids,
+        "poll_correct_answers": poll_correct_answers,
+        "total": len(questions_data),
+        "correct_count": 0,
+        "wrong_count": 0,
+        "answered_count": 0
+    }
+
+    context.user_data[CURRENT_STATE_KEY] = None
+    await update.message.reply_text(f"تم إنشاء {len(questions_data)} سؤال(أسئلة) بنجاح!")
+
+# -------------------------------------------------
+# 12) الهاندلر العام للرسائل (اختيار عدد الأسئلة + تريجر في المجموعات)
+# -------------------------------------------------
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # إذا كانت الرسالة في مجموعة وتتضمن إحدى العبارات التالية، نبدأ /start
+    if update.message.chat.type in ("group", "supergroup"):
+        text_lower = update.message.text.lower()
+        triggers = ["بوت سوي اسئلة", "بوت الاسئلة", "بوت وينك"]
+        if any(trig in text_lower for trig in triggers):
+            # كأننا نفذنا /start
+            await start_command(update, context)
+            return
+
+    user_state = context.user_data.get(CURRENT_STATE_KEY, None)
+
+    # إذا كنا في مرحلة طلب عدد الأسئلة
+    if user_state == STATE_ASK_NUM_QUESTIONS:
+        text = update.message.text.strip()
+        if not text.isdigit():
+            await update.message.reply_text("من فضلك أدخل رقمًا صحيحًا.")
+            return
+
+        num_q = int(text)
+        if num_q <= 0:
+            await update.message.reply_text("العدد يجب أن يكون أكبر من صفر.")
+            return
+
+        context.user_data[NUM_QUESTIONS_KEY] = num_q
+        context.user_data[CURRENT_STATE_KEY] = STATE_SENDING_QUESTIONS
+
+        topics_data = context.user_data.get(TOPICS_KEY, [])
+        t_idx = context.user_data.get(CUR_TOPIC_IDX_KEY, 0)
+        s_idx = context.user_data.get(CUR_SUBTOPIC_IDX_KEY, 0)
+
+        if t_idx < 0 or t_idx >= len(topics_data):
+            await update.message.reply_text("خطأ في اختيار الموضوع.")
+            return
+
+        subtopics = topics_data[t_idx].get("subTopics", [])
+        if s_idx < 0 or s_idx >= len(subtopics):
+            await update.message.reply_text("خطأ في اختيار الموضوع الفرعي.")
+            return
+
+        # جلب الأسئلة من الملف
+        file_path = subtopics[s_idx]["file"]
+        questions = fetch_questions(file_path)
+        if not questions:
+            await update.message.reply_text("لم أتمكن من جلب أسئلة لهذا الموضوع الفرعي.")
+            return
+
+        if num_q > len(questions):
+            await update.message.reply_text(
+                f"الأسئلة غير كافية. العدد المتاح هو: {len(questions)}"
+            )
+            return
+
+        random.shuffle(questions)
+        selected_questions = questions[:num_q]
+
+        await update.message.reply_text(
+            f"سيتم إرسال {num_q} سؤال(أسئلة) على شكل استفتاء (Quiz). بالتوفيق!"
+        )
+
+        poll_ids = []
+        poll_correct_answers = {}
+        owner_id = update.message.from_user.id
+        chat_id = update.message.chat_id
+
+        for idx, q in enumerate(selected_questions, start=1):
+            raw_question = q.get("question", "سؤال بدون نص!")
+            clean_question = re.sub(r"<.*?>", "", raw_question).strip()
+            clean_question = re.sub(r"(Question\s*\d+)", r"\1 -", clean_question)
+
+            options = q.get("options", [])
+            correct_id = q.get("answer", 0)
+            explanation = q.get("explanation", "")
+
+            sent_msg = await context.bot.send_poll(
+                chat_id=chat_id,
+                question=clean_question,
+                options=options,
+                type=Poll.QUIZ,
+                correct_option_id=correct_id,
+                explanation=explanation,
+                is_anonymous=False
+            )
+
+            if sent_msg.poll is not None:
+                pid = sent_msg.poll.id
+                poll_ids.append(pid)
+                poll_correct_answers[pid] = correct_id
+
+            await asyncio.sleep(1)
+
+        context.user_data[ACTIVE_QUIZ_KEY] = {
+            "owner_id": owner_id,
+            "chat_id": chat_id,
+            "poll_ids": poll_ids,
+            "poll_correct_answers": poll_correct_answers,
+            "total": num_q,
+            "correct_count": 0,
+            "wrong_count": 0,
+            "answered_count": 0
+        }
+
+        context.user_data[CURRENT_STATE_KEY] = None
+
+    # أي رسالة أخرى لا نفعل بها شيئًا
+    else:
+        pass
+
+# -------------------------------------------------
+# 13) هاندلر لاستقبال إجابات المستخدم (PollAnswerHandler)
+# -------------------------------------------------
+async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    poll_answer = update.poll_answer
+    user_id = poll_answer.user.id
+    poll_id = poll_answer.poll_id
+    selected_options = poll_answer.option_ids
+
+    quiz_data = context.user_data.get(ACTIVE_QUIZ_KEY)
+    if not quiz_data:
+        return  # لا يوجد كويز جاهز فعّال
+
+    if poll_id not in quiz_data["poll_ids"]:
+        return
+
+    if user_id != quiz_data["owner_id"]:
+        return
+
+    if len(selected_options) == 1:
+        chosen_index = selected_options[0]
+        correct_option_id = quiz_data["poll_correct_answers"][poll_id]
+
+        quiz_data["answered_count"] += 1
+        if chosen_index == correct_option_id:
+            quiz_data["correct_count"] += 1
+        else:
+            quiz_data["wrong_count"] += 1
+
+        if quiz_data["answered_count"] == quiz_data["total"]:
+            correct = quiz_data["correct_count"]
+            wrong = quiz_data["wrong_count"]
+            total = quiz_data["total"]
+            user_mention = f'<a href="tg://user?id={user_id}">{poll_answer.user.first_name}</a>'
+            msg = (
+                f"تم الانتهاء من الإجابة على {total} سؤال بواسطة {user_mention}.\n"
+                f"الإجابات الصحيحة: {correct}\n"
+                f"الإجابات الخاطئة: {wrong}\n"
+                f"النتيجة النهائية: {correct} / {total}\n"
+            )
+            await context.bot.send_message(
+                chat_id=quiz_data["chat_id"],
+                text=msg,
+                parse_mode="HTML"
+            )
+            context.user_data[ACTIVE_QUIZ_KEY] = None
+
+
+# -------------------------------------------------
+# 14) هاندلر لاستقبال إجابات الاستفتاء في الكويز المخصص
+# -------------------------------------------------
 async def custom_quiz_poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     poll_answer = update.poll_answer
     user_id = poll_answer.user.id
@@ -712,7 +689,7 @@ async def custom_quiz_poll_answer_handler(update: Update, context: ContextTypes.
 
     quiz_data = context.user_data.get(ACTIVE_CUSTOM_QUIZ_KEY)
     if not quiz_data:
-        return  # لا يوجد كويز مخصص فعال
+        return  # لا يوجد كويز مخصص فعّال
 
     if poll_id not in quiz_data["poll_ids"]:
         return
@@ -749,40 +726,12 @@ async def custom_quiz_poll_answer_handler(update: Update, context: ContextTypes.
             context.user_data[ACTIVE_CUSTOM_QUIZ_KEY] = None
 
 # -------------------------------------------------
-# 14) دالة main لتشغيل البوت (الكود الأصلي)
+# 15) دالة main لتشغيل البوت
 # -------------------------------------------------
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # ربط الأوامر
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("create_custom_quiz", create_custom_quiz_command))
-
-    # أزرار (CallbackQuery)
-    app.add_handler(CallbackQueryHandler(callback_handler))
-    app.add_handler(CallbackQueryHandler(custom_quiz_callback_handler, pattern="^(cancel_custom_quiz)$"))
-
-    # استقبال الرسائل النصية (عدد الأسئلة + تريجر المجموعات + الكويز المخصص)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, custom_quiz_message_handler))
-
-    # استقبال أجوبة الاستفتاء (PollAnswer)
-    app.add_handler(PollAnswerHandler(poll_answer_handler))
-    app.add_handler(PollAnswerHandler(custom_quiz_poll_answer_handler))
-
-    logger.info("Bot is running on Railway...")
-    app.run_polling()
-
-
-# -------------------------------------------------
-# 15) دالة بديلة لتشغيل البوت مع الميزات الإضافية
-#    (يمكنك استخدامها بدل main() عند الحاجة)
-# -------------------------------------------------
-def run_extended_bot():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    # الأوامر الأساسية
+    # الأوامر
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("create_custom_quiz", create_custom_quiz_command))
@@ -791,11 +740,41 @@ def run_extended_bot():
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(CallbackQueryHandler(custom_quiz_callback_handler, pattern="^(cancel_custom_quiz)$"))
 
-    # استقبال الرسائل
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    # ترتيب الهاندلرين للنص مهم:
+    # 1) أولاً هاندلر خاص بالكويز المخصص
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, custom_quiz_message_handler))
+    # 2) ثانياً الهاندلر العام للأسئلة العادية
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-    # استقبال أجوبة الاستفتاء (PollAnswer)
+    # استقبال أجوبة الاستفتاء (PollAnswer) للكويز الجاهز
+    app.add_handler(PollAnswerHandler(poll_answer_handler))
+    # استقبال أجوبة الاستفتاء (PollAnswer) للكويز المخصص
+    app.add_handler(PollAnswerHandler(custom_quiz_poll_answer_handler))
+
+    logger.info("Bot is running on Railway...")
+    app.run_polling()
+
+
+# -------------------------------------------------
+# 16) دالة بديلة لتشغيل البوت مع نفس الميزات
+# -------------------------------------------------
+def run_extended_bot():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # الأوامر
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("create_custom_quiz", create_custom_quiz_command))
+
+    # أزرار
+    app.add_handler(CallbackQueryHandler(callback_handler))
+    app.add_handler(CallbackQueryHandler(custom_quiz_callback_handler, pattern="^(cancel_custom_quiz)$"))
+
+    # ترتيب الهاندلرين للنص:
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, custom_quiz_message_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+
+    # PollAnswer
     app.add_handler(PollAnswerHandler(poll_answer_handler))
     app.add_handler(PollAnswerHandler(custom_quiz_poll_answer_handler))
 
