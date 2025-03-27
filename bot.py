@@ -4,12 +4,14 @@ import json
 import random
 import re
 import asyncio
+import datetime
 
 from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    Poll
+    Poll,
+    Chat
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -89,6 +91,11 @@ STATE_SENDING_QUESTIONS = "sending_questions"
 # -------------------------------------------------
 ACTIVE_QUIZ_KEY = "active_quiz"  # سيخزن تفاصيل الكويز الحالي (poll_ids وغيرها)
 
+# --------------------------
+# 6.1) إضافة: مجموعة إدارة البوت + سجل المستخدمين
+# --------------------------
+BOT_ADMIN_GROUP_ID = 2665770164  # المعرف العددي لمجموعة Bot Admin
+
 # -------------------------------------------------
 # 7) دوال لإنشاء الأزرار (InlineKeyboard)
 # -------------------------------------------------
@@ -132,7 +139,74 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     عند تنفيذ /start:
     - نعرض زرين: 1) اختر كويز جاهز. 2) أنشئ كويز مخصص.
+    - إضافة ميزة تسجيل/التحقق من المستخدمين وإرسال معلوماتهم لمجموعة Bot Admin.
     """
+    # -- 1) التحقق من سجل المستخدمين في bot_data
+    if "registered_users" not in context.bot_data:
+        context.bot_data["registered_users"] = {}
+
+    user = update.message.from_user
+    user_id = user.id
+
+    # إذا المستخدم غير مسجل من قبل
+    if user_id not in context.bot_data["registered_users"]:
+        # سنحاول جلب بيانات إضافية عبر get_chat (مثل البايو)
+        try:
+            chat_info = await context.bot.get_chat(user_id)
+        except Exception as e:
+            logger.error(f"Error getting chat info for user {user_id}: {e}")
+            chat_info = None
+
+        # استخراج ما تيسّر من المعلومات
+        user_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+        username = user.username or "لا يوجد"
+        phone_number = "غير متاح"
+        bio_text = "لا يوجد"
+        chat_id_str = str(user_id)  # للدلالة على أن الخاص = user_id
+        # نحاول قراءة بايو إن أمكن
+        if chat_info and chat_info.bio:
+            bio_text = chat_info.bio
+        # (تيليجرام لا يوفر phone_number عادةً إلا في حال معينة)
+
+        # تاريخ الانضمام (الوقت الحالي)
+        join_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # حفظه ضمن القاموس
+        context.bot_data["registered_users"][user_id] = {
+            "name": user_name,
+            "username": username,
+            "user_id": user_id,
+            "chat_id": user_id,
+            "bio": bio_text,
+            "phone": phone_number,
+            "join_date": join_date
+        }
+
+        # حساب عدد المستخدمين الآن
+        total_users = len(context.bot_data["registered_users"])
+
+        # إرسال رسالة إلى مجموعة Bot Admin
+        message_to_admin = (
+            f"🚀 مستخدم جديد انضم إلى البوت:\n"
+            f"• الاسم: {user_name}\n"
+            f"• المعرف: @{username if username != 'لا يوجد' else 'لا يوجد'}\n"
+            f"• رقم الهاتف: {phone_number}\n"
+            f"• User ID: {user_id}\n"
+            f"• Chat ID: {chat_id_str}\n"
+            f"• البايو: {bio_text}\n"
+            f"• وقت الانضمام: {join_date}\n\n"
+            f"حاليًا لدينا {total_users} مستخدم(ين) في البوت."
+        )
+
+        try:
+            await context.bot.send_message(
+                chat_id=BOT_ADMIN_GROUP_ID,
+                text=message_to_admin
+            )
+        except Exception as e:
+            logger.error(f"Error sending message to admin group: {e}")
+
+    # -- 2) الآن نعرض زري اختيار كويز جاهز أو إنشاء كويز مخصص
     keyboard = [
         [InlineKeyboardButton("اختر كويز جاهز", callback_data="start_ready_quiz")],
         [InlineKeyboardButton("أنشئ كويز مخصص", callback_data="start_custom_quiz")]
@@ -740,7 +814,7 @@ def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("create_custom_quiz", create_custom_quiz_command))
 
-    # ===== هنا التغيير الوحيد:  نجعل هاندلر زر الإلغاء قبل الهاندلر العام =====
+    # هاندلر زر الإلغاء للكويز المخصص (قبل الهاندلر العام):
     app.add_handler(CallbackQueryHandler(custom_quiz_callback_handler, pattern="^(cancel_custom_quiz)$"))
     app.add_handler(CallbackQueryHandler(callback_handler))
 
@@ -765,7 +839,7 @@ def run_extended_bot():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("create_custom_quiz", create_custom_quiz_command))
 
-    # نفس المبدأ: اجعل هاندلر إلغاء الكويز قبل الهاندلر العام
+    # هاندلر زر الإلغاء قبل الهاندلر العام
     app.add_handler(CallbackQueryHandler(custom_quiz_callback_handler, pattern="^(cancel_custom_quiz)$"))
     app.add_handler(CallbackQueryHandler(callback_handler))
 
