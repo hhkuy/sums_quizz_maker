@@ -38,20 +38,20 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = "7633072361:AAHnzREYTKKRFiTiq7HDZBalnwnmgivY8_I"
 
 # -------------------------------------------------
-# 3) روابط GitHub لجلب الملفات
+# 3) روابط GitHub لجلب الملفات (للكويز الجاهز)
 # -------------------------------------------------
 BASE_RAW_URL = "https://raw.githubusercontent.com/hhkuy/Sums_Q/main"
 TOPICS_JSON_URL = f"{BASE_RAW_URL}/data/topics.json"
 
 # ========== بيانات GitHub لتحديث user.json ==========
-# تم وضع التوكن هنا مباشرةً حسب طلبك
+# (بناءً على طلبك، وضعناها صراحةً)
 GITHUB_TOKEN = "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"
 GITHUB_REPO = "hhkuy/sums_quizz_maker"  # اسم المستودع في GitHub
 GITHUB_FILE_PATH = "user.json"          # اسم الملف داخل المستودع
 GITHUB_CONTENT_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
 
 # -------------------------------------------------
-# 4) دوال جلب البيانات من GitHub (المواضيع الجاهزة)
+# 4) دوال جلب المواضيع الجاهزة من GitHub
 # -------------------------------------------------
 def fetch_topics():
     """جلب ملف الـ topics.json من مستودع GitHub على شكل list[dict]."""
@@ -67,13 +67,12 @@ def fetch_topics():
 def fetch_questions(file_path: str):
     """
     جلب ملف الأسئلة من مستودع GitHub بالاعتماد على المسار (file_path) الخاص بالموضوع الفرعي.
-    مثال: data/anatomy_of_limbs_lower_limbs.json
     """
     url = f"{BASE_RAW_URL}/{file_path}"
     try:
         response = requests.get(url)
         response.raise_for_status()
-        return response.json()  # قائمة من القواميس (الأسئلة)
+        return response.json()
     except Exception as e:
         logger.error(f"Error fetching questions from {url}: {e}")
         return []
@@ -84,12 +83,12 @@ def fetch_questions(file_path: str):
 def fetch_users_from_github():
     """
     جلب محتوى user.json من مستودع GitHub (hhkuy/sums_quizz_maker).
-    يعيد قائمة من القواميس أو [] إذا كان الملف فارغ أو غير موجود.
-    كما يعيد sha الخاص بالملف لاستخدامه في التحديث.
+    يعيد قائمة من القواميس أو [] إذا كان فارغ،
+    كما يعيد sha للملف لاستخدامه في التحديث.
     """
     headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json"
+        "Authorization": f"token {GITHUB_TOKEN}",  # <-- changed to token not Bearer
+        "Accept": "application/vnd.github.v3+json"  # أو application/vnd.github+json
     }
     try:
         resp = requests.get(GITHUB_CONTENT_API_URL, headers=headers)
@@ -110,12 +109,10 @@ def fetch_users_from_github():
 def update_users_on_github(users_list, sha):
     """
     تحديث ملف user.json على GitHub بإضافة مستخدم أو تعديل القائمة.
-    users_list: القائمة النهائية من المستخدمين
-    sha: الـ SHA الخاص بالإصدار الحالي من الملف حتى يتم التعديل عليه
     """
     headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json"
+        "Authorization": f"token {GITHUB_TOKEN}",  # <-- changed
+        "Accept": "application/vnd.github.v3+json"
     }
 
     new_content = json.dumps(users_list, ensure_ascii=False, indent=2)
@@ -130,13 +127,16 @@ def update_users_on_github(users_list, sha):
     }
     try:
         resp = requests.put(GITHUB_CONTENT_API_URL, headers=headers, json=data)
+        # نسجّل النتيجة
+        logger.info(f"GitHub PUT status code: {resp.status_code}")
+        logger.info(f"GitHub PUT response text: {resp.text}")
         resp.raise_for_status()
         logger.info("user.json updated successfully on GitHub.")
     except Exception as e:
         logger.error(f"Error updating user.json: {e}")
 
 # -------------------------------------------------
-# 6) مفاتيح لحفظ الحالة في context.user_data
+# 6) مفاتيح حالات
 # -------------------------------------------------
 TOPICS_KEY = "topics"
 CUR_TOPIC_IDX_KEY = "current_topic_index"
@@ -149,19 +149,14 @@ STATE_SELECT_TOPIC = "select_topic"
 STATE_SELECT_SUBTOPIC = "select_subtopic"
 STATE_ASK_NUM_QUESTIONS = "ask_num_questions"
 STATE_SENDING_QUESTIONS = "sending_questions"
-
 CUSTOM_QUIZ_STATE = "custom_quiz_state"
 ACTIVE_CUSTOM_QUIZ_KEY = "active_custom_quiz"
 
 # -------------------------------------------------
-# 7) مفاتيح إضافية لحفظ بيانات الكويز/النتائج
+# 7) مفاتيح أخرى
 # -------------------------------------------------
-ACTIVE_QUIZ_KEY = "active_quiz"  # سيخزن تفاصيل الكويز الحالي (poll_ids وغيرها)
-
-# -------------------------------------------------
-# إعدادات أخرى
-# -------------------------------------------------
-ADMIN_CHAT_ID = 912860244  # الشخص الذي سيستقبل إشعارات المستخدمين الجدد
+ACTIVE_QUIZ_KEY = "active_quiz"  # سيخزن تفاصيل الكويز الحالي
+ADMIN_CHAT_ID = 912860244
 
 # -------------------------------------------------
 # 8) أوامر البوت: /start
@@ -187,7 +182,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 2) محاولة جلب البايو إن أمكن
     try:
-        chat_info = await context.bot.get_chat(user_id)  # استدعاء get_chat
+        chat_info = await context.bot.get_chat(user_id)
         if chat_info.bio:
             bio_text = chat_info.bio
         else:
@@ -200,6 +195,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # التحقق هل هو مستخدم جديد
     is_new = True
     for u in users_list:
+        # نعتبره متكرراً إذا تطابق user_id أو username أو chat_id
         if (u.get("user_id") == user_id) or (u.get("username") == username) or (u.get("chat_id") == chat_id):
             is_new = False
             break
@@ -282,29 +278,32 @@ async def start_command_flow(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # 9) أوامر البوت: /help
 # -------------------------------------------------
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # الأوامر العامة
     help_text = (
         "الأوامر المتاحة:\n"
         "/start - لعرض الأزرار (اختر كويز جاهز، أنشئ كويز مخصص)\n"
         "/help - عرض هذه الرسالة\n\n"
         "يمكنك أيضًا مناداتي في المجموعات وسيعمل البوت عند كتابة:\n"
         "«بوت سوي اسئلة» أو «بوت الاسئلة» أو «بوت وينك».\n"
-        "\n\n"
-        "أوامر خاصة بالإدمن:\n"
-        "/user_count - عرض عدد المستخدمين في البوت.\n"
-        "/all_users - عرض جميع المستخدمين.\n"
-        "/search_user <عبارة> - البحث عن مستخدم بالاسم أو المعرف.\n"
     )
+    # إذا كان المستخدم هو الإدمن
+    if update.effective_user.id == ADMIN_CHAT_ID:
+        help_text += (
+            "\n\n"
+            "أوامر خاصة بالإدمن:\n"
+            "/user_count - عرض عدد المستخدمين في البوت.\n"
+            "/all_users - عرض جميع المستخدمين.\n"
+            "/search_user <عبارة> - البحث عن مستخدم بالاسم أو المعرف.\n"
+        )
+
     await update.message.reply_text(help_text)
 
 # -------------------------------------------------
 # 9.1) أوامر خاصة بالإدمن لرؤية وإدارة المستخدمين
 # -------------------------------------------------
-ADMIN_CHAT_ID = 912860244  # نفس القيمة أعلاه
-
 async def user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # يسمح فقط للإدمن
     if update.effective_user.id != ADMIN_CHAT_ID:
-        return
+        return  # لا يفعل شيئًا إن لم يكن الإدمن
 
     users_list, _ = fetch_users_from_github()
     count = len(users_list)
@@ -349,11 +348,11 @@ async def search_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     results = []
     for u in users_list:
-        # نبحث في عدة حقول
-        if (query in str(u.get("username", "")).lower() or
-            query in str(u.get("first_name", "")).lower() or
-            query in str(u.get("user_id", "")).lower() or
-            query in str(u.get("chat_id", "")).lower() or
+        # نبحث في username, first_name, user_id, chat_id, bio
+        if (query in str(u.get("username","")).lower() or
+            query in str(u.get("first_name","")).lower() or
+            query in str(u.get("user_id","")).lower() or
+            query in str(u.get("chat_id","")).lower() or
             query in str(u.get("bio","")).lower()):
             results.append(u)
 
@@ -375,7 +374,7 @@ async def search_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(msg)
 
 # -------------------------------------------------
-# 10) هاندلر للأزرار (CallbackQueryHandler)
+# 10) أزرار (CallbackQueryHandler)
 # -------------------------------------------------
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -481,9 +480,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.message.reply_text("لم أفهم هذا الخيار.")
 
-# -------------------------------------------------
-# 11) الكويز المخصص: ثوابت + دوال
-# -------------------------------------------------
+
 async def create_custom_quiz_command_from_callback(query, context: ContextTypes.DEFAULT_TYPE):
     instructions = (
         "مرحبًا! لإنشاء اختبار مخصص، الرجاء إرسال الأسئلة جميعها في رسالة واحدة بالشكل التالي:\n\n"
@@ -511,6 +508,9 @@ async def create_custom_quiz_command_from_callback(query, context: ContextTypes.
     context.user_data[CURRENT_STATE_KEY] = CUSTOM_QUIZ_STATE
     await query.message.reply_text(instructions, reply_markup=kb)
 
+# -------------------------------------------------
+# 11) الكويز المخصص
+# -------------------------------------------------
 async def create_custom_quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     instructions = (
         "مرحبًا! لإنشاء اختبار مخصص، الرجاء إرسال الأسئلة جميعها في رسالة واحدة بالشكل التالي:\n\n"
@@ -627,9 +627,11 @@ async def unified_message_handler(update: Update, context: ContextTypes.DEFAULT_
         await handle_ready_quiz_num_questions(update, context)
         return
 
-    pass
+    # خلاف ذلك لا نفعل شيئًا
 
-
+# -------------------------------------------------
+# 12.1) تنفيذ الكويز المخصص
+# -------------------------------------------------
 async def handle_custom_quiz_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     questions_data = parse_custom_questions(text)
@@ -679,7 +681,9 @@ async def handle_custom_quiz_text(update: Update, context: ContextTypes.DEFAULT_
     context.user_data[CURRENT_STATE_KEY] = None
     await update.message.reply_text(f"تم إنشاء {len(questions_data)} سؤال(أسئلة) بنجاح!")
 
-
+# -------------------------------------------------
+# 12.2) تنفيذ الكويز الجاهز (عدد الأسئلة)
+# -------------------------------------------------
 async def handle_ready_quiz_num_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if not text.isdigit():
@@ -865,7 +869,7 @@ async def custom_quiz_poll_answer_handler(update: Update, context: ContextTypes.
             context.user_data[ACTIVE_CUSTOM_QUIZ_KEY] = None
 
 # -------------------------------------------------
-# 15) دالة main لتشغيل البوت
+# 15) دالة main
 # -------------------------------------------------
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -887,7 +891,7 @@ def main():
     # هاندلر موحد للرسائل النصية
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_message_handler))
 
-    # PollAnswer
+    # PollAnswer (الكويز الجاهز + الكويز المخصص)
     app.add_handler(PollAnswerHandler(poll_answer_handler))
     app.add_handler(PollAnswerHandler(custom_quiz_poll_answer_handler))
 
@@ -895,7 +899,7 @@ def main():
     app.run_polling()
 
 # -------------------------------------------------
-# 16) دالة بديلة لتشغيل البوت (نفس الميزات)
+# 16) دالة بديلة لتشغيل البوت
 # -------------------------------------------------
 def run_extended_bot():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
