@@ -1,1 +1,21 @@
+[
+  {
+    "user_id": 123456789,
+    "username": "Ali",
+    "user_handle": "aliuser",
+    "phone_number": "غير متاح",
+    "chat_id": 123456789,
+    "bio": "Bio text here",
+    "entry_date": "2025-03-27 16:00:00"
+  },
+  {
+    "user_id": 987654321,
+    "username": "Hassan",
+    "user_handle": "hassan123",
+    "phone_number": "غير متاح",
+    "chat_id": 987654321,
+    "bio": "Student",
+    "entry_date": "2025-03-27 16:05:00"
+  }
+]
 
