@@ -43,15 +43,15 @@ BOT_TOKEN = "7633072361:AAHnzREYTKKRFiTiq7HDZBalnwnmgivY8_I"
 BASE_RAW_URL = "https://raw.githubusercontent.com/hhkuy/Sums_Q/main"
 TOPICS_JSON_URL = f"{BASE_RAW_URL}/data/topics.json"
 
-# ========== إعدادات GitHub لتحديث user.json في مستودع آخر ==========
-GITHUB_TOKEN = "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"  # مثلاً
-GITHUB_REPO = "hhkuy/sums_quizz_maker"  # اسم المستودع
+# ========== بيانات GitHub لتحديث user.json ==========
+# تم وضع التوكن هنا مباشرةً حسب طلبك
+GITHUB_TOKEN = "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"
+GITHUB_REPO = "hhkuy/sums_quizz_maker"  # اسم المستودع في GitHub
 GITHUB_FILE_PATH = "user.json"          # اسم الملف داخل المستودع
-# سنستخدم مسار الـ API الرسمي:
 GITHUB_CONTENT_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
 
 # -------------------------------------------------
-# 4) دوال جلب البيانات من GitHub (مواضيع جاهزة)
+# 4) دوال جلب البيانات من GitHub (المواضيع الجاهزة)
 # -------------------------------------------------
 def fetch_topics():
     """جلب ملف الـ topics.json من مستودع GitHub على شكل list[dict]."""
@@ -85,6 +85,7 @@ def fetch_users_from_github():
     """
     جلب محتوى user.json من مستودع GitHub (hhkuy/sums_quizz_maker).
     يعيد قائمة من القواميس أو [] إذا كان الملف فارغ أو غير موجود.
+    كما يعيد sha الخاص بالملف لاستخدامه في التحديث.
     """
     headers = {
         "Authorization": f"Bearer {GITHUB_TOKEN}",
@@ -94,13 +95,11 @@ def fetch_users_from_github():
         resp = requests.get(GITHUB_CONTENT_API_URL, headers=headers)
         resp.raise_for_status()
         data = resp.json()
-        # محتوى الملف base64
-        content_b64 = data["content"]
-        # فك الترميز
+        content_b64 = data["content"]  # محتوى الملف بشكل base64
         decoded = base64.b64decode(content_b64).decode("utf-8")
         if decoded.strip():
             users = json.loads(decoded)
-            return users, data["sha"]  # نعطي أيضًا sha لاستخدامه لاحقًا في التحديث
+            return users, data["sha"]  # نعطي أيضًا sha لاستخدامه لاحقًا
         else:
             return [], data["sha"]
     except Exception as e:
@@ -110,7 +109,7 @@ def fetch_users_from_github():
 
 def update_users_on_github(users_list, sha):
     """
-    تحديث ملف user.json على GitHub بإضافة مستخدمين جدد مثلاً.
+    تحديث ملف user.json على GitHub بإضافة مستخدم أو تعديل القائمة.
     users_list: القائمة النهائية من المستخدمين
     sha: الـ SHA الخاص بالإصدار الحالي من الملف حتى يتم التعديل عليه
     """
@@ -170,32 +169,35 @@ ADMIN_CHAT_ID = 912860244  # الشخص الذي سيستقبل إشعارات �
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     عند تنفيذ /start:
-    1) التحقق من وجود المستخدم في user.json (على GitHub).
-    2) إذا مستخدم جديد => إضافته + إرسال إشعار للإدمن.
-    3) عرض زرين: 1) اختر كويز جاهز. 2) أنشئ كويز مخصص.
+    1) جلب user.json من GitHub
+    2) محاولة جلب bio المستخدم (إن توفر)
+    3) التحقق إن كان مستخدم جديد => إضافته وإشعار الإدمن
+    4) عرض زرين: "اختر كويز جاهز" و "أنشئ كويز مخصص"
     """
-    # 1) نجلب قائمة المستخدمين من GitHub
     users_list, sha = fetch_users_from_github()
     if users_list is None:
         users_list = []
 
     user_obj = update.effective_user
     chat_id = update.effective_chat.id
-
-    # جمع المعلومات المطلوبة
     user_id = user_obj.id
     first_name = user_obj.first_name or "NoName"
     username = user_obj.username or "NoUsername"
-    # لاحظ: Telegram Bot API لا يزوّدنا بالهاتف مباشرةً
     phone_number = "غير متوفر"
-    # لا يزوّدنا بالـ Bio
-    bio_text = "غير متوفر"
 
-    # تاريخ الانضمام
+    # 2) محاولة جلب البايو إن أمكن
+    try:
+        chat_info = await context.bot.get_chat(user_id)  # استدعاء get_chat
+        if chat_info.bio:
+            bio_text = chat_info.bio
+        else:
+            bio_text = "غير متوفر"
+    except:
+        bio_text = "غير متوفر"
+
     join_date = str(datetime.datetime.now())[:19]  # YYYY-MM-DD HH:MM:SS
 
-    # التحقق هل المستخدم موجود
-    # نعتمد على معيار (id) أو (username) أو (chat_id)
+    # التحقق هل هو مستخدم جديد
     is_new = True
     for u in users_list:
         if (u.get("user_id") == user_id) or (u.get("username") == username) or (u.get("chat_id") == chat_id):
@@ -203,7 +205,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             break
 
     if is_new:
-        # 2) مستخدم جديد => نضيفه
         new_user_data = {
             "user_id": user_id,
             "username": username,
@@ -214,25 +215,27 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "join_date": join_date
         }
         users_list.append(new_user_data)
-        # تحديث الملف على GitHub
         if sha:
             update_users_on_github(users_list, sha)
 
-        # إرسال إشعار فقط للإدمن
+        # إشعار الإدمن
         try:
             await context.bot.send_message(
                 chat_id=ADMIN_CHAT_ID,
-                text=f"انضم مستخدم جديد:\n"
-                     f"الاسم: {first_name}\n"
-                     f"المعرف: @{username}\n"
-                     f"ID: {user_id}\n"
-                     f"ChatID: {chat_id}\n"
-                     f"الوقت: {join_date}"
+                text=(
+                    f"انضم مستخدم جديد:\n"
+                    f"الاسم: {first_name}\n"
+                    f"المعرف: @{username}\n"
+                    f"البايو: {bio_text}\n"
+                    f"ID: {user_id}\n"
+                    f"ChatID: {chat_id}\n"
+                    f"الوقت: {join_date}"
+                )
             )
         except Exception as e:
             logger.error(f"Error sending message to admin: {e}")
 
-    # بقية منطق عرض الأزرار
+    # بقية منطق العرض
     keyboard = [
         [InlineKeyboardButton("اختر كويز جاهز", callback_data="start_ready_quiz")],
         [InlineKeyboardButton("أنشئ كويز مخصص", callback_data="start_custom_quiz")]
@@ -248,7 +251,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "هسة أختار احد الاختيارين و كول يا الله و صلِ على محمد و أل محمد :"
     )
 
-    # إرسال الرسالة العادية
     await update.message.reply_text(
         welcome_message,
         parse_mode="Markdown",
@@ -256,7 +258,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # -------------------------------------------------
-# 8.1) المنطق الأصلي لجلب المواضيع وعرضها (كان في start_command سابقًا)
+# 8.1) المنطق الأصلي لجلب المواضيع وعرضها
 # -------------------------------------------------
 async def start_command_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     topics_data = fetch_topics()
@@ -297,6 +299,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # -------------------------------------------------
 # 9.1) أوامر خاصة بالإدمن لرؤية وإدارة المستخدمين
 # -------------------------------------------------
+ADMIN_CHAT_ID = 912860244  # نفس القيمة أعلاه
+
 async def user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # يسمح فقط للإدمن
     if update.effective_user.id != ADMIN_CHAT_ID:
@@ -321,6 +325,7 @@ async def all_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Name: {u.get('first_name','')}, "
             f"UserID: {u.get('user_id')}, "
             f"Username: @{u.get('username')}, "
+            f"Bio: {u.get('bio','')}, "
             f"ChatID: {u.get('chat_id')}, "
             f"JoinDate: {u.get('join_date')}"
         )
@@ -344,10 +349,12 @@ async def search_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     results = []
     for u in users_list:
+        # نبحث في عدة حقول
         if (query in str(u.get("username", "")).lower() or
             query in str(u.get("first_name", "")).lower() or
             query in str(u.get("user_id", "")).lower() or
-            query in str(u.get("chat_id", "")).lower()):
+            query in str(u.get("chat_id", "")).lower() or
+            query in str(u.get("bio","")).lower()):
             results.append(u)
 
     if not results:
@@ -360,12 +367,12 @@ async def search_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"Name: {r.get('first_name','')}, "
             f"UserID: {r.get('user_id')}, "
             f"Username: @{r.get('username')}, "
+            f"Bio: {r.get('bio','')}, "
             f"ChatID: {r.get('chat_id')}, "
             f"JoinDate: {r.get('join_date')}"
         )
     msg = "\n".join(lines)
     await update.message.reply_text(msg)
-
 
 # -------------------------------------------------
 # 10) هاندلر للأزرار (CallbackQueryHandler)
@@ -375,7 +382,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
-    # زر "اختر كويز جاهز" من /start
     if data == "start_ready_quiz":
         topics_data = fetch_topics()
         context.user_data[TOPICS_KEY] = topics_data
@@ -392,12 +398,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # زر "أنشئ كويز مخصص" من /start
     elif data == "start_custom_quiz":
         await create_custom_quiz_command_from_callback(query, context)
         return
 
-    # 1) اختيار موضوع رئيسي
     if data.startswith("topic_"):
         _, idx_str = data.split("_")
         topic_index = int(idx_str)
@@ -422,7 +426,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=subtopics_keyboard
         )
 
-    # 2) زر الرجوع لقائمة المواضيع
     elif data == "go_back_topics":
         context.user_data[CURRENT_STATE_KEY] = STATE_SELECT_TOPIC
         topics_data = context.user_data.get(TOPICS_KEY, [])
@@ -433,7 +436,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard
         )
 
-    # 3) اختيار موضوع فرعي
     elif data.startswith("subtopic_"):
         _, t_idx_str, s_idx_str = data.split("_")
         t_idx = int(t_idx_str)
@@ -453,7 +455,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=kb
         )
 
-    # 4) زر الرجوع لقائمة المواضيع الفرعية
     elif data.startswith("go_back_subtopics_"):
         _, t_idx_str = data.split("_subtopics_")
         t_idx = int(t_idx_str)
@@ -511,9 +512,6 @@ async def create_custom_quiz_command_from_callback(query, context: ContextTypes.
     await query.message.reply_text(instructions, reply_markup=kb)
 
 async def create_custom_quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    أمر صريح: /create_custom_quiz
-    """
     instructions = (
         "مرحبًا! لإنشاء اختبار مخصص، الرجاء إرسال الأسئلة جميعها في رسالة واحدة بالشكل التالي:\n\n"
         "1. نص السؤال الأول\n"
@@ -614,12 +612,10 @@ def parse_custom_questions(text: str):
 async def unified_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_state = context.user_data.get(CURRENT_STATE_KEY, None)
 
-    # إذا المستخدم في وضع الكويز المخصص
     if user_state == CUSTOM_QUIZ_STATE:
         await handle_custom_quiz_text(update, context)
         return
 
-    # لو الرسالة في مجموعة وتحوي تريغرات => نفذ start_command
     if update.message.chat.type in ("group", "supergroup"):
         text_lower = update.message.text.lower()
         triggers = ["بوت سوي اسئلة", "بوت الاسئلة", "بوت وينك"]
@@ -627,12 +623,10 @@ async def unified_message_handler(update: Update, context: ContextTypes.DEFAULT_
             await start_command(update, context)
             return
 
-    # لو المستخدم في مرحلة طلب عدد الأسئلة (الكويز الجاهز)
     if user_state == STATE_ASK_NUM_QUESTIONS:
         await handle_ready_quiz_num_questions(update, context)
         return
 
-    # خلاف ذلك، لا نفعل شيئًا.
     pass
 
 
@@ -777,7 +771,7 @@ async def handle_ready_quiz_num_questions(update: Update, context: ContextTypes.
     context.user_data[CURRENT_STATE_KEY] = None
 
 # -------------------------------------------------
-# 13) هاندلر PollAnswer للكويز الجاهز
+# 13) PollAnswer للكويز الجاهز
 # -------------------------------------------------
 async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     poll_answer = update.poll_answer
@@ -824,7 +818,7 @@ async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             context.user_data[ACTIVE_QUIZ_KEY] = None
 
 # -------------------------------------------------
-# 14) هاندلر PollAnswer للكويز المخصص
+# 14) PollAnswer للكويز المخصص
 # -------------------------------------------------
 async def custom_quiz_poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     poll_answer = update.poll_answer
@@ -886,7 +880,7 @@ def main():
     app.add_handler(CommandHandler("all_users", all_users_command))
     app.add_handler(CommandHandler("search_user", search_user_command))
 
-    # ترتيب هاندلرات أزرار الكويز
+    # ترتيب هاندلرات Callback
     app.add_handler(CallbackQueryHandler(custom_quiz_callback_handler, pattern="^(cancel_custom_quiz)$"))
     app.add_handler(CallbackQueryHandler(callback_handler))
 
@@ -900,9 +894,8 @@ def main():
     logger.info("Bot is running on Railway...")
     app.run_polling()
 
-
 # -------------------------------------------------
-# 16) دالة بديلة لتشغيل البوت بالميزات نفسها
+# 16) دالة بديلة لتشغيل البوت (نفس الميزات)
 # -------------------------------------------------
 def run_extended_bot():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -916,14 +909,12 @@ def run_extended_bot():
     app.add_handler(CommandHandler("all_users", all_users_command))
     app.add_handler(CommandHandler("search_user", search_user_command))
 
-    # هاندلرات callback
+    # Callback
     app.add_handler(CallbackQueryHandler(custom_quiz_callback_handler, pattern="^(cancel_custom_quiz)$"))
     app.add_handler(CallbackQueryHandler(callback_handler))
 
-    # رسائل
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_message_handler))
 
-    # PollAnswer
     app.add_handler(PollAnswerHandler(poll_answer_handler))
     app.add_handler(PollAnswerHandler(custom_quiz_poll_answer_handler))
 
