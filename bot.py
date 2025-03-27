@@ -126,13 +126,12 @@ def generate_subtopics_inline_keyboard(topic, topic_index):
     return InlineKeyboardMarkup(keyboard)
 
 # -------------------------------------------------
-# 8) أوامر البوت: /start (تم تعديل الرسالة الترحيبية فقط لجعل المعرف قابل للضغط)
+# 8) أوامر البوت: /start
 # -------------------------------------------------
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     عند تنفيذ /start:
     - نعرض زرين: 1) اختر كويز جاهز. 2) أنشئ كويز مخصص.
-    - مع تغيير الرسالة الترحيبية فقط لجعل المعرف h_h_k9@ قابل للضغط.
     """
     keyboard = [
         [InlineKeyboardButton("اختر كويز جاهز", callback_data="start_ready_quiz")],
@@ -140,7 +139,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     markup = InlineKeyboardMarkup(keyboard)
 
-    # الرسالة المطلوبة (باستخدام Markdown لجعل المعرف clickable)
     welcome_message = (
         "هلا بيك نورت بوت حصرة ال dog 😵‍💫🚬\n\n"
         "تم صنعه من قِبل : [@h_h_k9](https://t.me/h_h_k9) 🙏🏻\n\n"
@@ -152,7 +150,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         welcome_message,
-        parse_mode="Markdown",  # للسماح برابط المعرف
+        parse_mode="Markdown",
         reply_markup=markup
     )
 
@@ -200,7 +198,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # زر "اختر كويز جاهز" من /start
     if data == "start_ready_quiz":
-        # تنفيذ المنطق الأصلي: عرض قائمة المواضيع من GitHub
         topics_data = fetch_topics()
         context.user_data[TOPICS_KEY] = topics_data
         if not topics_data:
@@ -635,7 +632,6 @@ async def handle_ready_quiz_num_questions(update: Update, context: ContextTypes.
         "answered_count": 0
     }
 
-    # بعد الإرسال، نخرج من حالة السؤال عن عدد الأسئلة
     context.user_data[CURRENT_STATE_KEY] = None
 
 # -------------------------------------------------
@@ -744,9 +740,9 @@ def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("create_custom_quiz", create_custom_quiz_command))
 
-    # أزرار
-    app.add_handler(CallbackQueryHandler(callback_handler))
+    # ===== هنا التغيير الوحيد:  نجعل هاندلر زر الإلغاء قبل الهاندلر العام =====
     app.add_handler(CallbackQueryHandler(custom_quiz_callback_handler, pattern="^(cancel_custom_quiz)$"))
+    app.add_handler(CallbackQueryHandler(callback_handler))
 
     # هاندلر موحد للرسائل النصية
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_message_handler))
@@ -769,13 +765,12 @@ def run_extended_bot():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("create_custom_quiz", create_custom_quiz_command))
 
-    app.add_handler(CallbackQueryHandler(callback_handler))
+    # نفس المبدأ: اجعل هاندلر إلغاء الكويز قبل الهاندلر العام
     app.add_handler(CallbackQueryHandler(custom_quiz_callback_handler, pattern="^(cancel_custom_quiz)$"))
+    app.add_handler(CallbackQueryHandler(callback_handler))
 
-    # هاندلر موحد للرسائل
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unified_message_handler))
 
-    # PollAnswer
     app.add_handler(PollAnswerHandler(poll_answer_handler))
     app.add_handler(PollAnswerHandler(custom_quiz_poll_answer_handler))
 
