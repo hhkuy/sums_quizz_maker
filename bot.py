@@ -50,7 +50,7 @@ BASE_RAW_URL = "https://raw.githubusercontent.com/hhkuy/Sums_Q/main"
 TOPICS_JSON_URL = f"{BASE_RAW_URL}/data/topics.json"
 
 # معلومات GitHub الخاصة بملف user.json
-GITHUB_TOKEN = "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"
+GITHUB_TOKEN = "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"
 GITHUB_REPO_OWNER = "hhkuy"
 GITHUB_REPO_NAME = "sums_quizz_maker"
 USER_JSON_PATH = "user.json"
